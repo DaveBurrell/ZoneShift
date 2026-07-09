@@ -118,9 +118,14 @@ internal sealed class SegmentedToggle : Panel
         if (!_ready || Width < 8 || Height < 8)
             return;
 
-        var half = Width / 2;
-        _left.SetBounds(3, 3, half - 5, Height - 6);
-        _right.SetBounds(half + 1, 3, half - 5, Height - 6);
+        // Even split with a hairline gap so the active segment reads cleanly
+        const int inset = 3;
+        const int gap = 2;
+        var inner = Width - inset * 2 - gap;
+        var half = inner / 2;
+        var h = Height - inset * 2;
+        _left.SetBounds(inset, inset, half, h);
+        _right.SetBounds(inset + half + gap, inset, Width - inset - (inset + half + gap), h);
         _left.FlatAppearance.BorderSize = 0;
         _right.FlatAppearance.BorderSize = 0;
     }

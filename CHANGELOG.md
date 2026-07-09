@@ -2,6 +2,14 @@
 
 All notable changes to ZoneShift are documented here.
 
+## 1.6.1
+
+### UI polish
+- Responsive toolbar (Copy pinned; options reflow / hide when narrow)
+- Master field rhythm and dual-column date/time
+- Theme-aware desktop overlay
+- Footer link spacing; tooltips; denser card/tile padding
+
 ## 1.6.0
 
 ### UI

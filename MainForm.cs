@@ -49,14 +49,20 @@ public sealed class MainForm : Form
     private Label _brandSubtitle = null!;
     private Label _wallSectionLabel = null!;
     private Panel _footerBar = null!;
-    private Panel _footerLinks = null!;
+    private FlowLayoutPanel _footerLinks = null!;
     private Panel _toolbarHost = null!;
     private Panel _clockHost = null!;
     private Panel _leftHost = null!;
     private Panel _wallHeader = null!;
     private Panel _wallFooter = null!;
+    private Panel _toolbarWrap = null!;
+    private Panel _wallWrap = null!;
+    private StudioPanel _sourceCard = null!;
+    private StudioPanel _wallCard = null!;
+    private readonly ToolTip _tips = new() { ShowAlways = false, AutoPopDelay = 6000 };
     private readonly List<ToolStripMenuItem> _themeMenuItems = [];
     private bool _updateBusy;
+    private bool _layoutToolbarReady;
 
     private NotifyIcon _trayIcon = null!;
     private ContextMenuStrip _trayMenu = null!;
@@ -312,22 +318,27 @@ public sealed class MainForm : Form
         _statusLabel.AutoEllipsis = true;
         _statusLabel.Padding = new Padding(0, 0, 8, 0);
 
-        _footerLinks = new Panel
+        _footerLinks = new FlowLayoutPanel
         {
             Dock = DockStyle.Right,
-            Width = 240,
-            BackColor = UiTheme.FooterBack
+            Width = 250,
+            BackColor = UiTheme.FooterBack,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Padding = new Padding(4, (LayoutMetrics.FooterH - 18) / 2, 0, 0),
+            AutoSize = false
         };
 
-        var linkY = (LayoutMetrics.FooterH - 16) / 2;
-        _footerTipsLink = MakeFooterLink("Tips", 8, linkY);
+        _footerTipsLink = MakeFooterLink("Tips");
         _footerTipsLink.LinkClicked += (_, _) => ShowOnboarding(force: true);
-        _footerAboutLink = MakeFooterLink("About", 56, linkY);
+        _footerAboutLink = MakeFooterLink("About");
         _footerAboutLink.LinkClicked += (_, _) => ShowAbout();
-        _footerUpdatesLink = MakeFooterLink("Check updates", 120, linkY);
+        _footerUpdatesLink = MakeFooterLink("Check updates");
         _footerUpdatesLink.LinkClicked += async (_, _) => await CheckForUpdatesAsync();
         _footerLinks.Controls.Add(_footerTipsLink);
+        _footerLinks.Controls.Add(MakeFooterSep());
         _footerLinks.Controls.Add(_footerAboutLink);
+        _footerLinks.Controls.Add(MakeFooterSep());
         _footerLinks.Controls.Add(_footerUpdatesLink);
 
         _footerBar.Controls.Add(_statusLabel);
@@ -424,7 +435,7 @@ public sealed class MainForm : Form
         Controls.Add(header);
 
         // --- Control toolbar ---
-        var toolbarWrap = new Panel
+        _toolbarWrap = new Panel
         {
             Dock = DockStyle.Top,
             Height = LayoutMetrics.ToolbarOuterH,
@@ -435,21 +446,11 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill
         };
-        var toolbar = _toolbarHost;
-        var tx = LayoutMetrics.ToolbarInnerPadX;
-        var ty = LayoutMetrics.ToolbarInnerPadY;
-        var th = LayoutMetrics.ToolbarControlH;
 
-        _directionToggle.Location = new Point(tx, ty);
-        _directionToggle.Size = new Size(236, th);
         _directionToggle.SelectionChanged += OnDirectionChanged;
-
-        _formatToggle.Location = new Point(tx + 236 + LayoutMetrics.ToolbarGap, ty);
-        _formatToggle.Size = new Size(156, th);
         _formatToggle.SelectionChanged += OnFormatChanged;
 
         var cardFace = UiTheme.CardFace;
-        var checkX = tx + 236 + LayoutMetrics.ToolbarGap + 156 + LayoutMetrics.ToolbarGap + 4;
 
         _overlayCheck.Text = "Overlay";
         _overlayCheck.Font = new Font("Segoe UI Semibold", 8.5f);
@@ -457,7 +458,6 @@ public sealed class MainForm : Form
         _overlayCheck.BackColor = cardFace;
         _overlayCheck.FlatStyle = FlatStyle.Flat;
         _overlayCheck.AutoSize = true;
-        _overlayCheck.Location = new Point(checkX, ty + 6);
         _overlayCheck.CheckedChanged += OnOverlayCheckChanged;
 
         _closeToTrayCheck.Text = "Close to tray";
@@ -466,7 +466,6 @@ public sealed class MainForm : Form
         _closeToTrayCheck.BackColor = cardFace;
         _closeToTrayCheck.FlatStyle = FlatStyle.Flat;
         _closeToTrayCheck.AutoSize = true;
-        _closeToTrayCheck.Location = new Point(checkX + 90, ty + 6);
         _closeToTrayCheck.CheckedChanged += (_, _) =>
         {
             if (_suppressEvents) return;
@@ -475,8 +474,7 @@ public sealed class MainForm : Form
         };
 
         _copyButton.Text = "Copy";
-        _copyButton.Size = new Size(72, th);
-        _copyButton.Location = new Point(620, ty);
+        _copyButton.Size = new Size(LayoutMetrics.CopyW, LayoutMetrics.ToolbarControlH);
         UiTheme.StylePrimaryButton(_copyButton);
         var copyMenu = new ContextMenuStrip();
         copyMenu.Items.Add("Copy multi-line", null, (_, _) => CopyResults(oneLine: false));
@@ -489,20 +487,22 @@ public sealed class MainForm : Form
         };
         _copyButton.ContextMenuStrip = copyMenu;
 
-        toolbar.Controls.Add(_directionToggle);
-        toolbar.Controls.Add(_formatToggle);
-        toolbar.Controls.Add(_overlayCheck);
-        toolbar.Controls.Add(_closeToTrayCheck);
-        toolbar.Controls.Add(_copyButton);
-        toolbar.Resize += (_, _) =>
-        {
-            _copyButton.Left = Math.Max(
-                checkX + 200,
-                toolbar.ClientSize.Width - _copyButton.Width - LayoutMetrics.ToolbarInnerPadX);
-            _copyButton.Top = ty;
-        };
-        toolbarWrap.Controls.Add(toolbar);
-        Controls.Add(toolbarWrap);
+        _tips.SetToolTip(_directionToggle, "Convert from your PC zone, or enter a time in another zone");
+        _tips.SetToolTip(_formatToggle, "12-hour or 24-hour clock display");
+        _tips.SetToolTip(_overlayCheck, "Always-on-top mini clock for meetings");
+        _tips.SetToolTip(_closeToTrayCheck, "Close button hides to the system tray instead of quitting");
+        _tips.SetToolTip(_copyButton, "Copy results (right-click for one-line chat format)");
+
+        _toolbarHost.Controls.Add(_directionToggle);
+        _toolbarHost.Controls.Add(_formatToggle);
+        _toolbarHost.Controls.Add(_overlayCheck);
+        _toolbarHost.Controls.Add(_closeToTrayCheck);
+        _toolbarHost.Controls.Add(_copyButton);
+        _layoutToolbarReady = true;
+        _toolbarHost.Resize += (_, _) => LayoutToolbar();
+        LayoutToolbar();
+        _toolbarWrap.Controls.Add(_toolbarHost);
+        Controls.Add(_toolbarWrap);
 
         // --- Master clock + input ---
         _sourceWrap = new Panel
@@ -512,12 +512,13 @@ public sealed class MainForm : Form
             BackColor = UiTheme.AppBackground,
             Padding = new Padding(LayoutMetrics.OuterX, LayoutMetrics.OuterY, LayoutMetrics.OuterX, 0)
         };
-        var sourceCard = new StudioPanel
+        _sourceCard = new StudioPanel
         {
             Dock = DockStyle.Fill,
             // Docked hosts (left + clock) sit inside the rounded card
             Padding = new Padding(LayoutMetrics.CardPad)
         };
+        var sourceCard = _sourceCard;
 
         _clockHost = new Panel
         {
@@ -606,7 +607,7 @@ public sealed class MainForm : Form
         Controls.Add(_sourceWrap);
 
         // --- World clock wall ---
-        var wallWrap = new Panel
+        _wallWrap = new Panel
         {
             Dock = DockStyle.Fill,
             BackColor = UiTheme.AppBackground,
@@ -616,18 +617,19 @@ public sealed class MainForm : Form
                 LayoutMetrics.OuterX,
                 LayoutMetrics.OuterBottom)
         };
-        var wallCard = new StudioPanel
+        _wallCard = new StudioPanel
         {
             Dock = DockStyle.Fill,
-            Padding = new Padding(2)
+            Padding = new Padding(LayoutMetrics.WallCardPad)
         };
+        var wallCard = _wallCard;
 
         _wallHeader = new Panel
         {
             Dock = DockStyle.Top,
             Height = LayoutMetrics.WallHeaderH,
             BackColor = cardFace,
-            Padding = new Padding(LayoutMetrics.CardPad, 8, LayoutMetrics.CardPad, 4)
+            Padding = new Padding(LayoutMetrics.CardPad, 10, LayoutMetrics.CardPad, 6)
         };
         _wallSectionLabel = new Label
         {
@@ -686,18 +688,63 @@ public sealed class MainForm : Form
         wallCard.Controls.Add(_targetListHost);
         wallCard.Controls.Add(wallFooter);
         wallCard.Controls.Add(_wallHeader);
-        wallWrap.Controls.Add(wallCard);
-        Controls.Add(wallWrap);
+        _wallWrap.Controls.Add(wallCard);
+        Controls.Add(_wallWrap);
 
         // Dock z-order: Fill under Tops; Bottom already docked
-        Controls.SetChildIndex(wallWrap, 0);
+        Controls.SetChildIndex(_wallWrap, 0);
         Controls.SetChildIndex(_sourceWrap, 1);
-        Controls.SetChildIndex(toolbarWrap, 2);
+        Controls.SetChildIndex(_toolbarWrap, 2);
         Controls.SetChildIndex(header, 3);
         Controls.SetChildIndex(_mainMenu, 4);
         Controls.SetChildIndex(_footerBar, 5);
 
         ResumeLayout(true);
+    }
+
+    /// <summary>
+    /// Responsive toolbar: toggles left, options center-left, Copy pinned right.
+    /// Never lets checkboxes collide with Copy.
+    /// </summary>
+    private void LayoutToolbar()
+    {
+        if (!_layoutToolbarReady || _toolbarHost is null || _toolbarHost.ClientSize.Width < 40)
+            return;
+
+        var padX = LayoutMetrics.ToolbarInnerPadX;
+        var padY = LayoutMetrics.ToolbarInnerPadY;
+        var h = LayoutMetrics.ToolbarControlH;
+        var gap = LayoutMetrics.ToolbarGap;
+        var w = _toolbarHost.ClientSize.Width;
+
+        _directionToggle.SetBounds(padX, padY, LayoutMetrics.DirectionW, h);
+        _formatToggle.SetBounds(padX + LayoutMetrics.DirectionW + gap, padY, LayoutMetrics.FormatW, h);
+
+        _copyButton.Size = new Size(LayoutMetrics.CopyW, h);
+        _copyButton.Location = new Point(Math.Max(padX, w - padX - LayoutMetrics.CopyW), padY);
+
+        // Options sit between format toggle and Copy, with a safe gap
+        var optsLeft = _formatToggle.Right + gap + 8;
+        var optsRight = _copyButton.Left - gap;
+        var optsSpace = optsRight - optsLeft;
+
+        _overlayCheck.Visible = optsSpace >= 70;
+        _closeToTrayCheck.Visible = optsSpace >= 200;
+
+        if (_overlayCheck.Visible)
+        {
+            _overlayCheck.Location = new Point(optsLeft, padY + (h - _overlayCheck.PreferredSize.Height) / 2);
+            if (_closeToTrayCheck.Visible)
+            {
+                var trayX = _overlayCheck.Right + 14;
+                if (trayX + 100 > optsRight)
+                    _closeToTrayCheck.Visible = false;
+                else
+                    _closeToTrayCheck.Location = new Point(
+                        trayX,
+                        padY + (h - _closeToTrayCheck.PreferredSize.Height) / 2);
+            }
+        }
     }
 
     private void SelectTheme(AppThemeId id)
@@ -728,6 +775,10 @@ public sealed class MainForm : Form
     {
         BackColor = UiTheme.AppBackground;
         var card = UiTheme.CardFace;
+
+        if (_toolbarWrap is not null) _toolbarWrap.BackColor = UiTheme.AppBackground;
+        if (_sourceWrap is not null) _sourceWrap.BackColor = UiTheme.AppBackground;
+        if (_wallWrap is not null) _wallWrap.BackColor = UiTheme.AppBackground;
 
         _mainMenu.BackColor = UiTheme.HeaderBack;
         _mainMenu.ForeColor = UiTheme.TextPrimary;
@@ -787,23 +838,46 @@ public sealed class MainForm : Form
         foreach (var row in _targetRows)
             row.ApplyTheme();
         RefreshFavoriteVisuals();
+        LayoutToolbar();
+        LayoutMasterFields(ConvertToLocal);
+
+        // Refresh footer separators
+        foreach (Control c in _footerLinks.Controls)
+        {
+            if (c is Label { Text: "|" } sep)
+            {
+                sep.ForeColor = UiTheme.TextMuted;
+                sep.BackColor = UiTheme.FooterBack;
+            }
+        }
 
         Invalidate(true);
     }
 
-    private static LinkLabel MakeFooterLink(string text, int x, int y = 8)
+    private static LinkLabel MakeFooterLink(string text)
     {
         var link = new LinkLabel
         {
             Text = text,
             AutoSize = true,
-            Location = new Point(x, y),
+            Margin = new Padding(6, 0, 6, 0),
             BackColor = UiTheme.FooterBack,
             Font = new Font("Segoe UI Semibold", 8.25f)
         };
         StyleFooterLink(link);
         return link;
     }
+
+    private static Label MakeFooterSep() =>
+        new()
+        {
+            Text = "|",
+            AutoSize = true,
+            Margin = new Padding(0, 0, 0, 0),
+            ForeColor = UiTheme.TextMuted,
+            BackColor = UiTheme.FooterBack,
+            Font = UiTheme.CaptionFont
+        };
 
     private static void StyleCaption(Label label, string text)
     {
@@ -1032,41 +1106,45 @@ public sealed class MainForm : Form
 
         const int x = LayoutMetrics.ContentX;
         var y = LayoutMetrics.ContentY;
-        // Leave room for clock host + card pad; width scales with host
-        var fieldW = Math.Max(280, _leftHost.ClientSize.Width - x - LayoutMetrics.ContentRightGutter);
-        if (fieldW > 420) fieldW = 420;
+        var avail = _leftHost.ClientSize.Width - x - LayoutMetrics.ContentRightGutter;
+        var fieldW = Math.Clamp(avail > 40 ? avail : 320, 280, 440);
+        var colW = Math.Min(156, (fieldW - LayoutMetrics.FieldGap) / 2);
+        var col2 = x + colW + LayoutMetrics.FieldGap;
 
-        _sourceSectionTitle.SetBounds(x, y, fieldW, 18);
-        y += 22;
+        _sourceSectionTitle.SetBounds(x, y, fieldW, 20);
+        y += 24;
 
         _localZoneCaption.SetBounds(x, y, fieldW, LayoutMetrics.LineCaption);
-        y += LayoutMetrics.LineCaption + 2;
+        y += LayoutMetrics.LineCaption + 3;
         _localTimezoneLabel.SetBounds(x, y, fieldW, LayoutMetrics.LineBody);
         y += LayoutMetrics.LineBody + LayoutMetrics.BlockGap;
 
         _reverseZoneRow.Visible = reverse;
         if (reverse)
         {
-            _reverseZoneRow.SetBounds(x, y, fieldW, 48);
+            _reverseZoneRow.SetBounds(x, y, fieldW, 52);
             _inputZoneCaption.SetBounds(0, 0, fieldW, LayoutMetrics.LineCaption);
-            _reverseSourceTimezone.SetBounds(0, 16, fieldW, LayoutMetrics.LineField);
-            y += 48 + LayoutMetrics.BlockGap;
+            _reverseSourceTimezone.SetBounds(0, 18, fieldW, LayoutMetrics.LineField);
+            y += 52 + LayoutMetrics.BlockGap;
         }
 
-        _liveModeCheck.Location = new Point(x, y + 2);
-        _useNowButton.Location = new Point(x + 200, y);
-        y += 30;
+        _liveModeCheck.Location = new Point(x, y + 4);
+        // Keep Reset aligned to second column when space allows
+        var resetX = Math.Max(x + 210, col2);
+        if (resetX + _useNowButton.Width > x + fieldW)
+            resetX = x + fieldW - _useNowButton.Width;
+        _useNowButton.Location = new Point(Math.Max(x, resetX), y);
+        y += 34;
 
-        _dateFieldCaption.SetBounds(x, y, 148, LayoutMetrics.LineCaption);
-        _timeFieldCaption.SetBounds(x + 164, y, 148, LayoutMetrics.LineCaption);
-        y += LayoutMetrics.LineCaption + 4;
-        _datePicker.SetBounds(x, y, 148, 26);
-        _timeEntry.SetBounds(x + 164, y, 148, 26);
-        y += 30;
+        _dateFieldCaption.SetBounds(x, y, colW, LayoutMetrics.LineCaption);
+        _timeFieldCaption.SetBounds(col2, y, colW, LayoutMetrics.LineCaption);
+        y += LayoutMetrics.LineCaption + 5;
+        _datePicker.SetBounds(x, y, colW, LayoutMetrics.LineField);
+        _timeEntry.SetBounds(col2, y, colW, LayoutMetrics.LineField);
+        y += LayoutMetrics.LineField + 10;
 
-        // Host height = content + outer wrap padding + card padding*2 + a little air
-        var contentH = y + LayoutMetrics.ContentY + 8;
-        var wrapH = contentH + LayoutMetrics.CardPad * 2 + LayoutMetrics.OuterY + 4;
+        var contentH = y + LayoutMetrics.ContentY;
+        var wrapH = contentH + LayoutMetrics.CardPad * 2 + LayoutMetrics.OuterY + 6;
         _sourceWrap.Height = Math.Max(
             reverse ? LayoutMetrics.SourceHReverse : LayoutMetrics.SourceHNormal,
             wrapH);

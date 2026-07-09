@@ -27,9 +27,9 @@ internal sealed class TargetZoneRow
         EventHandler onFavorite)
     {
         const int pad = LayoutMetrics.TileInner;
-        const int chromeH = 26;
+        const int chromeH = 28;
         const int comboH = 28;
-        const int gap = 8;
+        const int gap = 10;
 
         var tile = new ClockTilePanel
         {

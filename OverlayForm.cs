@@ -3,8 +3,8 @@ using System.ComponentModel;
 namespace TimezoneConverter;
 
 /// <summary>
-/// Sticky-note style always-on-top overlay showing local time and converted zones.
-/// Supports opacity, position lock, and compact mode.
+/// Sticky always-on-top overlay showing local time and converted zones.
+/// Colors follow the active <see cref="UiTheme"/>.
 /// </summary>
 internal sealed class OverlayForm : Form
 {
@@ -14,6 +14,8 @@ internal sealed class OverlayForm : Form
     private readonly Button _lockButton = new();
     private readonly Button _compactButton = new();
     private readonly TrackBar _opacityBar = new();
+    private readonly Panel _opacityPanel = new();
+    private readonly Label _opacityLabel = new();
     private readonly Panel _localPanel = new();
     private readonly Label _localLabel = new();
     private readonly Label _localTimeLabel = new();
@@ -52,8 +54,8 @@ internal sealed class OverlayForm : Form
         {
             _compact = value;
             _compactButton.Text = _compact ? "E" : "C";
-            _localPanel.Height = _compact ? 36 : 58;
-            _localTimeLabel.Font = new Font("Consolas", _compact ? 12f : 18f, FontStyle.Bold);
+            _localPanel.Height = _compact ? 40 : 62;
+            _localTimeLabel.Font = new Font("Consolas", _compact ? 13f : 20f, FontStyle.Bold);
             foreach (var row in _rows)
                 row.SetCompact(_compact);
             SettingsChanged?.Invoke(this, EventArgs.Empty);
@@ -79,23 +81,58 @@ internal sealed class OverlayForm : Form
         ShowInTaskbar = false;
         TopMost = true;
         StartPosition = FormStartPosition.Manual;
-        MinimumSize = new Size(220, 100);
-        Size = new Size(280, 240);
-        BackColor = Color.FromArgb(15, 23, 42);
+        MinimumSize = new Size(240, 120);
+        Size = new Size(300, 260);
+        BackColor = UiTheme.AppBackground;
         Opacity = 0.94;
         Font = UiTheme.BodyFont;
         DoubleBuffered = true;
         Padding = new Padding(0);
 
         BuildUi();
+        ApplyThemeChrome();
+        UiTheme.ThemeChanged += OnThemeChanged;
+        Disposed += (_, _) => UiTheme.ThemeChanged -= OnThemeChanged;
+    }
+
+    private void OnThemeChanged()
+    {
+        if (IsDisposed) return;
+        ApplyThemeChrome();
+        foreach (var row in _rows)
+            row.ApplyTheme();
+        Invalidate(true);
+    }
+
+    private void ApplyThemeChrome()
+    {
+        BackColor = UiTheme.AppBackground;
+        _titleBar.BackColor = UiTheme.HeaderBack;
+        _titleLabel.ForeColor = UiTheme.TextPrimary;
+        _titleLabel.BackColor = UiTheme.HeaderBack;
+        StyleTitleButton(_closeButton);
+        StyleTitleButton(_lockButton);
+        StyleTitleButton(_compactButton);
+
+        _opacityPanel.BackColor = UiTheme.AppBackground;
+        _opacityLabel.ForeColor = UiTheme.TextSecondary;
+        _opacityLabel.BackColor = UiTheme.AppBackground;
+        _opacityBar.BackColor = UiTheme.AppBackground;
+
+        _localPanel.BackColor = UiTheme.CardFace;
+        _localLabel.ForeColor = UiTheme.TextSecondary;
+        _localLabel.BackColor = UiTheme.CardFace;
+        _localTimeLabel.ForeColor = UiTheme.ClockFore;
+        _localTimeLabel.BackColor = UiTheme.CardFace;
+
+        _rowsHost.BackColor = UiTheme.AppBackground;
     }
 
     private void BuildUi()
     {
         _titleBar.Dock = DockStyle.Top;
-        _titleBar.Height = 32;
-        _titleBar.BackColor = Color.FromArgb(30, 41, 59);
-        _titleBar.Padding = new Padding(8, 0, 2, 0);
+        _titleBar.Height = 34;
+        _titleBar.Padding = new Padding(12, 0, 4, 0);
         _titleBar.Cursor = Cursors.SizeAll;
         _titleBar.MouseDown += TitleBar_MouseDown;
         _titleBar.MouseMove += TitleBar_MouseMove;
@@ -104,10 +141,8 @@ internal sealed class OverlayForm : Form
 
         _titleLabel.Text = "ZoneShift";
         _titleLabel.Font = new Font("Segoe UI Semibold", 9f);
-        _titleLabel.ForeColor = Color.FromArgb(226, 232, 240);
         _titleLabel.Dock = DockStyle.Fill;
         _titleLabel.TextAlign = ContentAlignment.MiddleLeft;
-        _titleLabel.BackColor = Color.Transparent;
         _titleLabel.Cursor = Cursors.SizeAll;
         _titleLabel.MouseDown += TitleBar_MouseDown;
         _titleLabel.MouseMove += TitleBar_MouseMove;
@@ -116,21 +151,17 @@ internal sealed class OverlayForm : Form
 
         _closeButton.Text = "x";
         _closeButton.Dock = DockStyle.Right;
-        _closeButton.Width = 26;
-        StyleTitleButton(_closeButton);
+        _closeButton.Width = 28;
         _closeButton.Click += (_, _) => CloseRequested?.Invoke(this, EventArgs.Empty);
 
         _compactButton.Text = "C";
         _compactButton.Dock = DockStyle.Right;
-        _compactButton.Width = 26;
-        StyleTitleButton(_compactButton);
+        _compactButton.Width = 28;
         _compactButton.Click += (_, _) => IsCompact = !IsCompact;
-        // Tooltips via title: C=compact, E=expand, L=locked, U=unlocked
 
         _lockButton.Text = "U";
         _lockButton.Dock = DockStyle.Right;
-        _lockButton.Width = 26;
-        StyleTitleButton(_lockButton);
+        _lockButton.Width = 28;
         _lockButton.Click += (_, _) =>
         {
             IsLocked = !IsLocked;
@@ -142,56 +173,42 @@ internal sealed class OverlayForm : Form
         _titleBar.Controls.Add(_compactButton);
         _titleBar.Controls.Add(_closeButton);
 
-        // Opacity strip
-        var opacityPanel = new Panel
-        {
-            Dock = DockStyle.Top,
-            Height = 22,
-            BackColor = Color.FromArgb(15, 23, 42),
-            Padding = new Padding(8, 0, 8, 0)
-        };
-        var opacityLabel = new Label
-        {
-            Text = "Opacity",
-            Dock = DockStyle.Left,
-            Width = 48,
-            ForeColor = Color.FromArgb(148, 163, 184),
-            Font = new Font("Segoe UI", 7.5f),
-            TextAlign = ContentAlignment.MiddleLeft,
-            BackColor = Color.Transparent
-        };
+        _opacityPanel.Dock = DockStyle.Top;
+        _opacityPanel.Height = 26;
+        _opacityPanel.Padding = new Padding(12, 2, 12, 2);
+
+        _opacityLabel.Text = "Opacity";
+        _opacityLabel.Dock = DockStyle.Left;
+        _opacityLabel.Width = 52;
+        _opacityLabel.Font = new Font("Segoe UI", 7.5f);
+        _opacityLabel.TextAlign = ContentAlignment.MiddleLeft;
+
         _opacityBar.Dock = DockStyle.Fill;
         _opacityBar.Minimum = 40;
         _opacityBar.Maximum = 100;
         _opacityBar.TickFrequency = 10;
         _opacityBar.Value = 94;
-        _opacityBar.BackColor = Color.FromArgb(15, 23, 42);
         _opacityBar.ValueChanged += (_, _) =>
         {
             Opacity = _opacityBar.Value / 100.0;
             SettingsChanged?.Invoke(this, EventArgs.Empty);
         };
-        opacityPanel.Controls.Add(_opacityBar);
-        opacityPanel.Controls.Add(opacityLabel);
+        _opacityPanel.Controls.Add(_opacityBar);
+        _opacityPanel.Controls.Add(_opacityLabel);
 
         _localPanel.Dock = DockStyle.Top;
-        _localPanel.Height = 58;
-        _localPanel.BackColor = Color.FromArgb(15, 23, 42);
-        _localPanel.Padding = new Padding(12, 6, 12, 4);
+        _localPanel.Height = 62;
+        _localPanel.Padding = new Padding(14, 8, 14, 8);
 
         _localLabel.Text = "YOUR TIME";
-        _localLabel.Font = new Font("Segoe UI", 7.5f);
-        _localLabel.ForeColor = Color.FromArgb(148, 163, 184);
+        _localLabel.Font = new Font("Segoe UI Semibold", 7.5f);
         _localLabel.Dock = DockStyle.Top;
-        _localLabel.Height = 14;
-        _localLabel.BackColor = Color.Transparent;
+        _localLabel.Height = 16;
 
         _localTimeLabel.Text = "--:--";
-        _localTimeLabel.Font = new Font("Consolas", 18f, FontStyle.Bold);
-        _localTimeLabel.ForeColor = Color.FromArgb(52, 211, 153);
+        _localTimeLabel.Font = new Font("Consolas", 20f, FontStyle.Bold);
         _localTimeLabel.Dock = DockStyle.Fill;
         _localTimeLabel.TextAlign = ContentAlignment.MiddleLeft;
-        _localTimeLabel.BackColor = Color.Transparent;
 
         _localPanel.Controls.Add(_localTimeLabel);
         _localPanel.Controls.Add(_localLabel);
@@ -200,12 +217,11 @@ internal sealed class OverlayForm : Form
         _rowsHost.FlowDirection = FlowDirection.TopDown;
         _rowsHost.WrapContents = false;
         _rowsHost.AutoScroll = true;
-        _rowsHost.BackColor = Color.FromArgb(15, 23, 42);
-        _rowsHost.Padding = new Padding(10, 4, 10, 10);
+        _rowsHost.Padding = new Padding(12, 8, 12, 12);
 
         Paint += (_, e) =>
         {
-            using var pen = new Pen(Color.FromArgb(51, 65, 85));
+            using var pen = new Pen(UiTheme.CardBorder);
             e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
         };
 
@@ -218,7 +234,7 @@ internal sealed class OverlayForm : Form
 
         Controls.Add(_rowsHost);
         Controls.Add(_localPanel);
-        Controls.Add(opacityPanel);
+        Controls.Add(_opacityPanel);
         Controls.Add(_titleBar);
     }
 
@@ -226,11 +242,13 @@ internal sealed class OverlayForm : Form
     {
         b.FlatStyle = FlatStyle.Flat;
         b.FlatAppearance.BorderSize = 0;
-        b.ForeColor = Color.FromArgb(148, 163, 184);
-        b.BackColor = Color.FromArgb(30, 41, 59);
+        b.ForeColor = UiTheme.TextSecondary;
+        b.BackColor = UiTheme.HeaderBack;
+        b.FlatAppearance.MouseOverBackColor = UiTheme.SegmentIdle;
         b.Cursor = Cursors.Hand;
         b.Font = new Font("Segoe UI Semibold", 9f);
         b.TabStop = false;
+        b.UseVisualStyleBackColor = false;
     }
 
     private void TitleBar_MouseDown(object? sender, MouseEventArgs e)
@@ -290,12 +308,12 @@ internal sealed class OverlayForm : Form
         {
             var (label, time, meta) = zones[i];
             _rows[i].Set(label, time, meta);
-            _rows[i].Root.Width = Math.Max(180, _rowsHost.ClientSize.Width - 24);
+            _rows[i].Root.Width = Math.Max(200, _rowsHost.ClientSize.Width - 28);
         }
 
-        var rowH = _compact ? 28 : 40;
-        var contentHeight = 32 + 22 + _localPanel.Height + 14 + zones.Count * (rowH + 4);
-        Height = Math.Clamp(contentHeight, 100, 560);
+        var rowH = _compact ? 32 : 42;
+        var contentHeight = 34 + 26 + _localPanel.Height + 16 + zones.Count * (rowH + 6);
+        Height = Math.Clamp(contentHeight, 120, 580);
     }
 
     private sealed class OverlayRow
@@ -311,41 +329,41 @@ internal sealed class OverlayForm : Form
             _compact = compact;
             Root = new Panel
             {
-                Height = compact ? 28 : 40,
-                Margin = new Padding(0, 0, 0, 4),
-                BackColor = Color.FromArgb(30, 41, 59),
-                Padding = new Padding(8, 2, 8, 2)
+                Height = compact ? 32 : 42,
+                Margin = new Padding(0, 0, 0, 6),
+                BackColor = UiTheme.CardFace,
+                Padding = new Padding(10, 4, 10, 4)
             };
 
             _name = new Label
             {
                 Dock = DockStyle.Left,
-                Width = 52,
-                Font = new Font("Segoe UI Semibold", 8f),
-                ForeColor = Color.FromArgb(165, 180, 252),
+                Width = 56,
+                Font = new Font("Segoe UI Semibold", 8.5f),
+                ForeColor = UiTheme.Accent,
                 TextAlign = ContentAlignment.MiddleLeft,
-                BackColor = Color.Transparent,
+                BackColor = UiTheme.CardFace,
                 AutoEllipsis = true
             };
 
             _meta = new Label
             {
                 Dock = DockStyle.Right,
-                Width = 54,
-                Font = new Font("Segoe UI", 7f),
-                ForeColor = Color.FromArgb(148, 163, 184),
+                Width = 60,
+                Font = new Font("Segoe UI", 7.5f),
+                ForeColor = UiTheme.TextSecondary,
                 TextAlign = ContentAlignment.MiddleRight,
-                BackColor = Color.Transparent,
+                BackColor = UiTheme.CardFace,
                 AutoEllipsis = true
             };
 
             _time = new Label
             {
                 Dock = DockStyle.Fill,
-                Font = new Font("Consolas", compact ? 10f : 12f, FontStyle.Bold),
-                ForeColor = Color.FromArgb(52, 211, 153),
+                Font = new Font("Consolas", compact ? 11f : 13f, FontStyle.Bold),
+                ForeColor = UiTheme.ClockFore,
                 TextAlign = ContentAlignment.MiddleCenter,
-                BackColor = Color.Transparent,
+                BackColor = UiTheme.CardFace,
                 AutoEllipsis = true
             };
 
@@ -364,8 +382,19 @@ internal sealed class OverlayForm : Form
         public void SetCompact(bool compact)
         {
             _compact = compact;
-            Root.Height = compact ? 28 : 40;
-            _time.Font = new Font("Consolas", compact ? 10f : 12f, FontStyle.Bold);
+            Root.Height = compact ? 32 : 42;
+            _time.Font = new Font("Consolas", compact ? 11f : 13f, FontStyle.Bold);
+        }
+
+        public void ApplyTheme()
+        {
+            Root.BackColor = UiTheme.CardFace;
+            _name.ForeColor = UiTheme.Accent;
+            _name.BackColor = UiTheme.CardFace;
+            _meta.ForeColor = UiTheme.TextSecondary;
+            _meta.BackColor = UiTheme.CardFace;
+            _time.ForeColor = UiTheme.ClockFore;
+            _time.BackColor = UiTheme.CardFace;
         }
     }
 }
