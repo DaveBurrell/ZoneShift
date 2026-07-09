@@ -3,7 +3,7 @@ using System.ComponentModel;
 namespace TimezoneConverter;
 
 /// <summary>
-/// Simple digital clock readout — solid panel, no region clipping (avoids text being cut off).
+/// Simple digital clock readout - solid panel, no region clipping (avoids text being cut off).
 /// </summary>
 internal sealed class DigitalClockPanel : Panel
 {

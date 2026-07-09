@@ -1,4 +1,4 @@
-﻿namespace TimezoneConverter;
+namespace TimezoneConverter;
 
 public sealed class MainForm : Form
 {
@@ -54,7 +54,7 @@ public sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
-        // Absolute layout — no autoscaling (prevents collapsed/overlapping sections)
+        // Absolute layout - no autoscaling (prevents collapsed/overlapping sections)
         AutoScaleMode = AutoScaleMode.None;
         Font = UiTheme.BodyFont;
         BackColor = UiTheme.AppBackground;
@@ -216,7 +216,7 @@ public sealed class MainForm : Form
             _shownTrayTip = true;
             _trayIcon.BalloonTipTitle = "ZoneShift";
             _trayIcon.BalloonTipText =
-                "Still running in the system tray. Double-click the icon to open again, or right-click â†’ Exit to quit.";
+                "Still running in the system tray. Double-click the icon to open again, or right-click Exit to quit.";
             _trayIcon.BalloonTipIcon = ToolTipIcon.Info;
             _trayIcon.ShowBalloonTip(3500);
         }
@@ -275,7 +275,7 @@ public sealed class MainForm : Form
         };
         var subtitle = new Label
         {
-            Text = "Live clocks · convert from your zone or into your zone",
+            Text = "Live clocks - convert from your zone or into your zone",
             Font = UiTheme.BodyFont,
             ForeColor = Color.FromArgb(199, 210, 254),
             BackColor = UiTheme.Accent,
@@ -558,7 +558,7 @@ public sealed class MainForm : Form
         // Dock order: Fill first, then Tops, Bottom already added.
         // Bring header/options/source to correct z by setting child index.
         // With Dock: add Fill last among fills; Tops added after Fill end up above Fill.
-        // Correct approach: Controls order — Bottom, Fill, then Tops from bottom to top of screen.
+        // Correct approach: Controls order - Bottom, Fill, then Tops from bottom to top of screen.
         // We already added: status(Bottom), header(Top), options(Top), source(Top), targets(Fill).
         // Re-order so Fill is under Tops:
         Controls.SetChildIndex(targetsWrap, 0);
@@ -845,7 +845,7 @@ public sealed class MainForm : Form
     private void ShowDetectedLocalTimezone()
     {
         var offset = _localTimezone.GetUtcOffset(DateTime.Now);
-        _localTimezoneLabel.Text = $"{_localTimezone.DisplayName}  Â·  {FormatOffset(offset)}";
+        _localTimezoneLabel.Text = $"{_localTimezone.DisplayName}  -  {FormatOffset(offset)}";
     }
 
     private void LoadTimezones()
@@ -1136,14 +1136,14 @@ public sealed class MainForm : Form
             if (ConvertToLocal)
             {
                 primaryCaption = _liveMode
-                    ? $"Your local (live)  Â·  {primaryTime:ddd d MMM}  Â·  {FormatOffset(localOffset)}"
-                    : $"{FormatDigitalTime(inputWall)} {inputLabel} â†’ local  Â·  {primaryTime:ddd d MMM}  Â·  {FormatOffset(localOffset)}";
+                    ? $"Your local (live)  -  {primaryTime:ddd d MMM}  -  {FormatOffset(localOffset)}"
+                    : $"{FormatDigitalTime(inputWall)} {inputLabel} -> local  -  {primaryTime:ddd d MMM}  -  {FormatOffset(localOffset)}";
             }
             else
             {
                 primaryCaption = _liveMode
-                    ? $"Live now  Â·  {primaryTime:ddd d MMM}  Â·  {FormatOffset(localOffset)}"
-                    : $"Custom local  Â·  {primaryTime:ddd d MMM}  Â·  {FormatOffset(localOffset)}";
+                    ? $"Live now  -  {primaryTime:ddd d MMM}  -  {FormatOffset(localOffset)}"
+                    : $"Custom local  -  {primaryTime:ddd d MMM}  -  {FormatOffset(localOffset)}";
             }
 
             _primaryClock.TimeText = FormatDigitalTime(primaryTime);
@@ -1176,18 +1176,18 @@ public sealed class MainForm : Form
 
             if (_overlay is { Visible: true, IsDisposed: false })
             {
-                var overlayCaption = _liveMode ? "Your time Â· live" : "Your time Â· custom";
+                var overlayCaption = _liveMode ? "Your time - live" : "Your time - custom";
                 _overlay.UpdateDisplay(FormatDigitalTime(primaryTime), overlayCaption, overlayZones);
             }
 
             var mode = Use24Hour ? "24-hour" : "12-hour";
             _statusLabel.Text = ConvertToLocal
                 ? (_liveMode
-                    ? $"To my zone Â· live Â· {GetInputTimezoneLabel()} â†’ local Â· {_targetRows.Count} zone(s) Â· {mode}"
-                    : $"To my zone Â· entered in {GetInputTimezoneLabel()} Â· {_targetRows.Count} zone(s) Â· {mode}")
+                    ? $"To my zone - live - {GetInputTimezoneLabel()} -> local - {_targetRows.Count} zone(s) - {mode}"
+                    : $"To my zone - entered in {GetInputTimezoneLabel()} - {_targetRows.Count} zone(s) - {mode}")
                 : (_liveMode
-                    ? $"From my zone Â· live Â· {_localTimezone.Id} Â· {_targetRows.Count} zone(s) Â· {mode}"
-                    : $"From my zone Â· custom Â· {_localTimezone.Id} Â· {_targetRows.Count} zone(s) Â· {mode}");
+                    ? $"From my zone - live - {_localTimezone.Id} - {_targetRows.Count} zone(s) - {mode}"
+                    : $"From my zone - custom - {_localTimezone.Id} - {_targetRows.Count} zone(s) - {mode}");
             _statusLabel.ForeColor = UiTheme.TextMuted;
         }
         catch (Exception ex)

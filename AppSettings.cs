@@ -24,7 +24,7 @@ public sealed class AppSettings
     /// <summary>Windows ID of the foreign timezone used when ConvertToLocal is true.</summary>
     public string? ReverseSourceWindowsId { get; set; }
 
-    /// <summary>Windows timezone IDs for target slots (1–8). Empty uses defaults.</summary>
+    /// <summary>Windows timezone IDs for target slots (1-8). Empty uses defaults.</summary>
     public string?[]? TargetWindowsIds { get; set; }
 
     public bool OverlayVisible { get; set; }

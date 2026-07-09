@@ -1,4 +1,4 @@
-// Usage: dotnet script / csi not required — run via: dotnet run --project tools if needed
+// Usage: dotnet script / csi not required - run via: dotnet run --project tools if needed
 // Invoked by: dotnet exec with a one-off compile from build script
 
 using System.Drawing;

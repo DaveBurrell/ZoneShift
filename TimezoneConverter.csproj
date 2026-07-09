@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -11,10 +11,10 @@
     <RootNamespace>TimezoneConverter</RootNamespace>
     <Product>ZoneShift</Product>
     <AssemblyTitle>ZoneShift</AssemblyTitle>
-    <Description>ZoneShift — convert times across timezones with live digital clocks</Description>
-    <Version>1.1.0</Version>
+    <Description>ZoneShift â€” convert times across timezones with live digital clocks</Description>
+    <Version>1.1.1</Version>
     <Company>ZoneShift</Company>
-    <Copyright>Copyright © ZoneShift</Copyright>
+    <Copyright>Copyright Â© ZoneShift</Copyright>
   </PropertyGroup>
 
   <!-- Single-file publish defaults (used by pack-installer.ps1) -->

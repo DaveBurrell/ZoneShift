@@ -22,7 +22,7 @@ public sealed class TimezoneOption
     public override string ToString() =>
         string.IsNullOrWhiteSpace(DisplayName)
             ? Abbreviation
-            : $"{Abbreviation}  ·  {DisplayName}";
+            : $"{Abbreviation}  -  {DisplayName}";
 
     /// <summary>
     /// Common timezones people pick when coordinating across regions.

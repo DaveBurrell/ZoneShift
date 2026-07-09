@@ -262,7 +262,7 @@ internal sealed class TimeEntryCombo : ComboBox
 
         if (core.Length == 3)
         {
-            // 730 → 7:30
+            // 730 -> 7:30
             hour = int.Parse(core[..1], CultureInfo.InvariantCulture);
             minute = int.Parse(core[1..], CultureInfo.InvariantCulture);
             return minute is >= 0 and <= 59;

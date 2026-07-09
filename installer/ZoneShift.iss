@@ -1,8 +1,8 @@
-; ZoneShift installer — compiled by Inno Setup 6
+﻿; ZoneShift installer - compiled by Inno Setup 6
 ; Source files come from: ..\publish\win-x64\
 
 #define MyAppName "ZoneShift"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.1.1"
 #define MyAppPublisher "ZoneShift"
 #define MyAppExeName "ZoneShift.exe"
 #define MyAppURL "https://github.com/zoneshift"

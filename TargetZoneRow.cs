@@ -2,7 +2,7 @@ namespace TimezoneConverter;
 
 /// <summary>
 /// One target row with clock right-aligned so long zone names never cover the time.
-/// Layout: [badge][combo........][offset][  CLOCK  ][×]
+/// Layout: [badge][combo........][offset][  CLOCK  ][x]
 /// </summary>
 internal sealed class TargetZoneRow
 {
@@ -78,7 +78,7 @@ internal sealed class TargetZoneRow
 
         RemoveButton = new Button
         {
-            Text = "×",
+            Text = "x",
             Font = new Font("Segoe UI Semibold", 11f),
             FlatStyle = FlatStyle.Flat,
             ForeColor = UiTheme.Danger,

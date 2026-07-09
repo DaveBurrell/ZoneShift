@@ -1,7 +1,7 @@
 namespace TimezoneConverter;
 
 /// <summary>
-/// Simple white content card with a light border — no custom region clipping.
+/// Simple white content card with a light border - no custom region clipping.
 /// </summary>
 internal sealed class RoundedCard : Panel
 {

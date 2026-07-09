@@ -62,7 +62,7 @@ internal sealed class OverlayForm : Form
         _titleLabel.MouseUp += (_, _) => _dragging = false;
         _titleLabel.DoubleClick += (_, _) => OpenMainRequested?.Invoke(this, EventArgs.Empty);
 
-        _closeButton.Text = "×";
+        _closeButton.Text = "x";
         _closeButton.Dock = DockStyle.Right;
         _closeButton.Width = 28;
         _closeButton.FlatStyle = FlatStyle.Flat;
