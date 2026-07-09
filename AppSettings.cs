@@ -10,7 +10,10 @@ public sealed class AppSettings
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+        // Keep empty arrays instead of omitting them
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never
     };
 
     public bool Use24Hour { get; set; }
@@ -82,12 +85,29 @@ public sealed class AppSettings
     {
         try
         {
+            var path = SettingsPath;
+            var dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir))
+                Directory.CreateDirectory(dir);
+
             var json = JsonSerializer.Serialize(this, JsonOptions);
-            File.WriteAllText(SettingsPath, json);
+            // Atomic-ish write so a crash mid-save does not wipe preferences
+            var temp = path + ".tmp";
+            File.WriteAllText(temp, json);
+            File.Copy(temp, path, overwrite: true);
+            File.Delete(temp);
         }
         catch
         {
-            // best-effort
+            // best-effort — try a direct write as fallback
+            try
+            {
+                File.WriteAllText(SettingsPath, JsonSerializer.Serialize(this, JsonOptions));
+            }
+            catch
+            {
+                // ignore
+            }
         }
     }
 }

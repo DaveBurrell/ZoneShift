@@ -44,7 +44,18 @@ internal sealed class TargetZoneRow
             Font = UiTheme.BodyFont,
             Size = new Size(180, 26)
         };
-        Combo.DataSource = options.ToList();
+        // Use Items.Add (not DataSource) so selection works before the control handle exists
+        Combo.BeginUpdate();
+        try
+        {
+            foreach (var opt in options)
+                Combo.Items.Add(opt);
+        }
+        finally
+        {
+            Combo.EndUpdate();
+        }
+
         Combo.SelectedIndexChanged += onChanged;
 
         Meta = new Label
@@ -128,11 +139,21 @@ internal sealed class TargetZoneRow
         RemoveButton.BringToFront();
     }
 
-    public TimezoneOption? SelectedOption => Combo.SelectedItem as TimezoneOption;
+    public TimezoneOption? SelectedOption
+    {
+        get
+        {
+            if (Combo.SelectedItem is TimezoneOption opt)
+                return opt;
+            if (Combo.SelectedIndex >= 0 && Combo.SelectedIndex < Combo.Items.Count)
+                return Combo.Items[Combo.SelectedIndex] as TimezoneOption;
+            return null;
+        }
+    }
 
     public void SetIndex(int oneBased) => IndexBadge.Text = oneBased.ToString();
 
-    public void SelectWindowsId(string windowsId)
+    public bool SelectWindowsId(string windowsId)
     {
         for (var i = 0; i < Combo.Items.Count; i++)
         {
@@ -140,12 +161,14 @@ internal sealed class TargetZoneRow
                 string.Equals(opt.WindowsId, windowsId, StringComparison.OrdinalIgnoreCase))
             {
                 Combo.SelectedIndex = i;
-                return;
+                return true;
             }
         }
+
+        return false;
     }
 
-    public void SelectAbbreviation(string abbreviation)
+    public bool SelectAbbreviation(string abbreviation)
     {
         for (var i = 0; i < Combo.Items.Count; i++)
         {
@@ -153,12 +176,17 @@ internal sealed class TargetZoneRow
                 string.Equals(opt.Abbreviation, abbreviation, StringComparison.OrdinalIgnoreCase))
             {
                 Combo.SelectedIndex = i;
-                return;
+                return true;
             }
         }
 
         if (Combo.Items.Count > 0)
+        {
             Combo.SelectedIndex = 0;
+            return false;
+        }
+
+        return false;
     }
 
     internal sealed class ClockFace

@@ -84,12 +84,16 @@ public sealed class MainForm : Form
         Shown += (_, _) =>
         {
             ClientSize = new Size(700, 780);
+            // Re-apply saved zones after handles exist (ComboBox selection is reliable now)
+            RestoreSavedTargetSelections();
             RebuildTargetListUi();
             RefreshDisplays();
+            PersistSettings();
         };
 
         FormClosing += OnFormClosing;
         Resize += OnFormResize;
+        Application.ApplicationExit += (_, _) => PersistSettings();
     }
 
     private void ApplyAppIcon()
@@ -170,6 +174,10 @@ public sealed class MainForm : Form
 
     private void OnFormClosing(object? sender, FormClosingEventArgs e)
     {
+        // Always save preferences first (including close-to-tray)
+        SaveOverlayPlacement();
+        PersistSettings();
+
         if (!_exitRequested && e.CloseReason == CloseReason.UserClosing)
         {
             e.Cancel = true;
@@ -178,8 +186,6 @@ public sealed class MainForm : Form
         }
 
         _liveTimer.Stop();
-        SaveOverlayPlacement();
-        PersistSettings();
 
         if (_overlay is not null && !_overlay.IsDisposed)
         {
@@ -855,7 +861,17 @@ public sealed class MainForm : Form
         _suppressEvents = true;
         try
         {
-            _reverseSourceTimezone.DataSource = _timezoneOptions.ToList();
+            _reverseSourceTimezone.BeginUpdate();
+            try
+            {
+                _reverseSourceTimezone.Items.Clear();
+                foreach (var opt in _timezoneOptions)
+                    _reverseSourceTimezone.Items.Add(opt);
+            }
+            finally
+            {
+                _reverseSourceTimezone.EndUpdate();
+            }
         }
         finally
         {
@@ -886,32 +902,80 @@ public sealed class MainForm : Form
                 SelectByAbbreviation(_reverseSourceTimezone, "IST");
             }
 
-            // Build target rows from settings (or defaults)
-            foreach (var existing in _targetRows.ToList())
-            {
-                existing.Root.Dispose();
-            }
-            _targetRows.Clear();
+            RebuildTargetRowsFromSettings();
+        }
+        finally
+        {
+            _suppressEvents = false;
+        }
+    }
 
-            var saved = (_settings.TargetWindowsIds ?? [])
-                .Where(id => !string.IsNullOrWhiteSpace(id))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Take(MaxTargetZones)
-                .ToList();
+    /// <summary>
+    /// Recreate target rows from saved Windows timezone IDs (or defaults).
+    /// </summary>
+    private void RebuildTargetRowsFromSettings()
+    {
+        foreach (var existing in _targetRows.ToList())
+            existing.Root.Dispose();
+        _targetRows.Clear();
 
-            if (saved.Count == 0)
-            {
-                foreach (var abbr in DefaultTargetAbbreviations.Take(MaxTargetZones))
-                    AddTargetRow(selectWindowsId: null, selectAbbreviation: abbr, persist: false);
-            }
-            else
-            {
-                foreach (var id in saved)
-                    AddTargetRow(selectWindowsId: id, selectAbbreviation: null, persist: false);
-            }
+        var saved = (_settings.TargetWindowsIds ?? Array.Empty<string?>())
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(MaxTargetZones)
+            .ToList();
 
-            if (_targetRows.Count == 0)
-                AddTargetRow(selectWindowsId: null, selectAbbreviation: "UTC", persist: false);
+        if (saved.Count == 0)
+        {
+            foreach (var abbr in DefaultTargetAbbreviations.Take(MaxTargetZones))
+                AddTargetRow(selectWindowsId: null, selectAbbreviation: abbr, persist: false);
+        }
+        else
+        {
+            foreach (var id in saved)
+                AddTargetRow(selectWindowsId: id, selectAbbreviation: null, persist: false);
+        }
+
+        if (_targetRows.Count == 0)
+            AddTargetRow(selectWindowsId: null, selectAbbreviation: "UTC", persist: false);
+    }
+
+    /// <summary>
+    /// After the form is shown, re-select saved zones so ComboBox handles are ready.
+    /// </summary>
+    private void RestoreSavedTargetSelections()
+    {
+        var saved = (_settings.TargetWindowsIds ?? Array.Empty<string?>())
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id!)
+            .ToList();
+
+        if (saved.Count == 0)
+            return;
+
+        // If row count does not match, rebuild from settings
+        if (_targetRows.Count != saved.Count)
+        {
+            _suppressEvents = true;
+            try
+            {
+                RebuildTargetRowsFromSettings();
+            }
+            finally
+            {
+                _suppressEvents = false;
+            }
+        }
+
+        _suppressEvents = true;
+        try
+        {
+            for (var i = 0; i < Math.Min(_targetRows.Count, saved.Count); i++)
+                _targetRows[i].SelectWindowsId(saved[i]);
+
+            if (!string.IsNullOrWhiteSpace(_settings.ReverseSourceWindowsId))
+                SelectByWindowsId(_reverseSourceTimezone, _settings.ReverseSourceWindowsId!);
         }
         finally
         {
@@ -945,21 +1009,40 @@ public sealed class MainForm : Form
 
     private void PersistSettings()
     {
-        _settings.Use24Hour = Use24Hour;
-        _settings.ConvertToLocal = ConvertToLocal;
-        _settings.OverlayVisible = _overlayCheck.Checked || (_overlay is { Visible: true });
+        try
+        {
+            _settings.Use24Hour = Use24Hour;
+            _settings.ConvertToLocal = ConvertToLocal;
+            _settings.OverlayVisible = _overlayCheck.Checked || (_overlay is { Visible: true });
 
-        if (_reverseSourceTimezone.SelectedItem is TimezoneOption reverseOpt)
-            _settings.ReverseSourceWindowsId = reverseOpt.WindowsId;
+            if (_reverseSourceTimezone.SelectedItem is TimezoneOption reverseOpt)
+                _settings.ReverseSourceWindowsId = reverseOpt.WindowsId;
+            else if (_reverseSourceTimezone.SelectedIndex >= 0 &&
+                     _reverseSourceTimezone.SelectedIndex < _reverseSourceTimezone.Items.Count &&
+                     _reverseSourceTimezone.Items[_reverseSourceTimezone.SelectedIndex] is TimezoneOption rev)
+            {
+                _settings.ReverseSourceWindowsId = rev.WindowsId;
+            }
 
-        _settings.TargetWindowsIds = _targetRows
-            .Select(r => r.SelectedOption?.WindowsId)
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .Cast<string>()
-            .ToArray();
+            var ids = new List<string>();
+            foreach (var row in _targetRows)
+            {
+                var id = row.SelectedOption?.WindowsId;
+                if (!string.IsNullOrWhiteSpace(id))
+                    ids.Add(id);
+            }
 
-        SaveOverlayPlacement();
-        _settings.Save();
+            // Never wipe saved zones with an empty list due to a transient UI state
+            if (ids.Count > 0)
+                _settings.TargetWindowsIds = ids.ToArray();
+
+            SaveOverlayPlacement();
+            _settings.Save();
+        }
+        catch
+        {
+            // Preferences are best-effort
+        }
     }
 
     private void OnOverlayCheckChanged(object? sender, EventArgs e)

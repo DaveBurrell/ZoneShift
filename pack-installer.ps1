@@ -1,4 +1,4 @@
-﻿# Builds ZoneShift and produces a single-file installer: dist\ZoneShift-Setup-1.1.1.exe
+﻿# Builds ZoneShift and produces a single-file installer: dist\ZoneShift-Setup-1.1.2.exe
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root

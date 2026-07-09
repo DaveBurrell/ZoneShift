@@ -12,7 +12,7 @@
     <Product>ZoneShift</Product>
     <AssemblyTitle>ZoneShift</AssemblyTitle>
     <Description>ZoneShift â€” convert times across timezones with live digital clocks</Description>
-    <Version>1.1.1</Version>
+    <Version>1.1.2</Version>
     <Company>ZoneShift</Company>
     <Copyright>Copyright Â© ZoneShift</Copyright>
   </PropertyGroup>
@@ -36,3 +36,4 @@
   </ItemGroup>
 
 </Project>
+

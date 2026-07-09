@@ -48,7 +48,7 @@ powershell -ExecutionPolicy Bypass -File .\pack-installer.ps1
 
 Output:
 
-`C:\Users\davej\source\TimezoneConverter\dist\ZoneShift-Setup-1.1.1.exe`
+`C:\Users\davej\source\TimezoneConverter\dist\ZoneShift-Setup-1.1.2.exe`
 
 The installer:
 - Installs under `Program Files` or per-user (standard wizard)
