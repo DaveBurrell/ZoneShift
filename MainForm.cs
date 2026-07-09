@@ -15,11 +15,13 @@ public sealed class MainForm : Form
     private readonly Label _timeFieldCaption = new();
     private readonly Panel _reverseZoneRow = new();
     private Panel _sourceWrap = null!;
-    private readonly ClippedComboBox _reverseSourceTimezone = new();
+    private readonly SearchableTimezoneBox _reverseSourceTimezone = new();
     private readonly DateTimePicker _datePicker = new();
     private readonly TimeEntryCombo _timeEntry = new();
     private readonly CheckBox _liveModeCheck = new();
     private readonly Button _useNowButton = new();
+    private readonly Button _copyButton = new();
+    private readonly Button _updateButton = new();
     private readonly SegmentedToggle _formatToggle = new("12-hour", "24-hour");
     private readonly SegmentedToggle _directionToggle = new("From my zone", "To my zone");
     private readonly CheckBox _overlayCheck = new();
@@ -29,6 +31,7 @@ public sealed class MainForm : Form
     private readonly List<TargetZoneRow> _targetRows = [];
     private FlowLayoutPanel _targetListHost = null!;
     private Label _targetCountLabel = null!;
+    private string _lastCopyText = "";
 
     private List<TimezoneOption> _timezoneOptions = [];
     private OverlayForm? _overlay;
@@ -85,16 +88,21 @@ public sealed class MainForm : Form
 
         Shown += (_, _) =>
         {
-            ClientSize = new Size(700, 780);
-            // Re-apply saved zones after handles exist (ComboBox selection is reliable now)
+            RestoreWindowBounds();
             RestoreSavedTargetSelections();
             RebuildTargetListUi();
+            RefreshFavoriteVisuals();
             RefreshDisplays();
             PersistSettings();
         };
 
         FormClosing += OnFormClosing;
         Resize += OnFormResize;
+        LocationChanged += (_, _) =>
+        {
+            if (_ready && WindowState == FormWindowState.Normal)
+                SaveWindowBounds();
+        };
         Application.ApplicationExit += (_, _) => PersistSettings();
     }
 
@@ -338,8 +346,8 @@ public sealed class MainForm : Form
 
         var aboutLink = new LinkLabel
         {
-            Text = "About / diagnostics",
-            Location = new Point(380, 70),
+            Text = "About",
+            Location = new Point(360, 70),
             AutoSize = true,
             LinkColor = UiTheme.Accent,
             ActiveLinkColor = UiTheme.Accent,
@@ -347,12 +355,36 @@ public sealed class MainForm : Form
         };
         aboutLink.LinkClicked += (_, _) => ShowAbout();
 
+        _updateButton.Text = "Check updates";
+        _updateButton.FlatStyle = FlatStyle.Flat;
+        _updateButton.Font = UiTheme.CaptionFont;
+        _updateButton.ForeColor = UiTheme.Accent;
+        _updateButton.BackColor = UiTheme.AccentSoft;
+        _updateButton.FlatAppearance.BorderSize = 0;
+        _updateButton.Cursor = Cursors.Hand;
+        _updateButton.Size = new Size(100, 24);
+        _updateButton.Location = new Point(420, 66);
+        _updateButton.Click += async (_, _) => await CheckForUpdatesAsync();
+
+        _copyButton.Text = "Copy results";
+        _copyButton.FlatStyle = FlatStyle.Flat;
+        _copyButton.Font = UiTheme.CaptionFont;
+        _copyButton.ForeColor = UiTheme.Accent;
+        _copyButton.BackColor = UiTheme.AccentSoft;
+        _copyButton.FlatAppearance.BorderSize = 0;
+        _copyButton.Cursor = Cursors.Hand;
+        _copyButton.Size = new Size(90, 24);
+        _copyButton.Location = new Point(530, 66);
+        _copyButton.Click += (_, _) => CopyResults();
+
         optionsCard.Controls.Add(dirCap);
         optionsCard.Controls.Add(_directionToggle);
         optionsCard.Controls.Add(fmtCap);
         optionsCard.Controls.Add(_formatToggle);
         optionsCard.Controls.Add(_overlayCheck);
         optionsCard.Controls.Add(aboutLink);
+        optionsCard.Controls.Add(_updateButton);
+        optionsCard.Controls.Add(_copyButton);
         optionsWrap.Controls.Add(optionsCard);
         Controls.Add(optionsWrap);
 
@@ -628,13 +660,23 @@ public sealed class MainForm : Form
             return;
 
         TargetZoneRow? row = null;
+        var favorites = (_settings.FavoriteWindowsIds ?? Array.Empty<string?>())
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id!)
+            .ToArray();
         row = new TargetZoneRow(
             _timezoneOptions,
+            favorites,
             OnTargetChanged,
             (_, _) =>
             {
                 if (row is not null)
                     RemoveTargetRow(row);
+            },
+            (_, _) =>
+            {
+                if (row?.SelectedOption is TimezoneOption opt)
+                    ToggleFavorite(opt.WindowsId);
             });
 
         _suppressEvents = true;
@@ -662,6 +704,9 @@ public sealed class MainForm : Form
                 else if (row.Combo.Items.Count > 0)
                     row.Combo.SelectedIndex = 0;
             }
+
+            if (row.SelectedOption is TimezoneOption selected)
+                row.RefreshFavoriteVisual(_settings.IsFavorite(selected.WindowsId));
         }
         finally
         {
@@ -874,26 +919,133 @@ public sealed class MainForm : Form
     private void LoadTimezones()
     {
         _timezoneOptions = TimezoneOption.BuildFullList().ToList();
-
         _suppressEvents = true;
         try
         {
-            _reverseSourceTimezone.BeginUpdate();
-            try
-            {
-                _reverseSourceTimezone.Items.Clear();
-                foreach (var opt in _timezoneOptions)
-                    _reverseSourceTimezone.Items.Add(opt);
-            }
-            finally
-            {
-                _reverseSourceTimezone.EndUpdate();
-            }
+            _reverseSourceTimezone.SetOptions(
+                _timezoneOptions,
+                (_settings.FavoriteWindowsIds ?? Array.Empty<string?>()).Where(id => id is not null).Select(id => id!));
         }
         finally
         {
             _suppressEvents = false;
         }
+    }
+
+    private void ToggleFavorite(string windowsId)
+    {
+        _settings.ToggleFavorite(windowsId);
+        RefreshFavoriteVisuals();
+        PersistSettings();
+    }
+
+    private void RefreshFavoriteVisuals()
+    {
+        var favs = (_settings.FavoriteWindowsIds ?? Array.Empty<string?>())
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id!)
+            .ToArray();
+        foreach (var row in _targetRows)
+            row.ApplyFavorites(favs);
+        _reverseSourceTimezone.SetFavorites(favs);
+    }
+
+    private void CopyResults()
+    {
+        if (string.IsNullOrWhiteSpace(_lastCopyText))
+        {
+            RefreshDisplays();
+        }
+
+        if (string.IsNullOrWhiteSpace(_lastCopyText))
+        {
+            MessageBox.Show(this, "Nothing to copy yet.", "ZoneShift", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        try
+        {
+            Clipboard.SetText(_lastCopyText);
+            _statusLabel.Text = "Results copied to clipboard.";
+            _statusLabel.ForeColor = UiTheme.Success;
+            AppLog.Info("Copied conversion results to clipboard.");
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("Clipboard copy failed", ex);
+            MessageBox.Show(this, "Could not access the clipboard.", "ZoneShift", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private async Task CheckForUpdatesAsync()
+    {
+        _updateButton.Enabled = false;
+        _statusLabel.Text = "Checking for updates...";
+        _statusLabel.ForeColor = UiTheme.TextMuted;
+        try
+        {
+            var version = typeof(MainForm).Assembly.GetName().Version?.ToString(3) ?? "1.2.0";
+            var result = await UpdateChecker.CheckAsync(version);
+            if (result.UpdateAvailable && !string.IsNullOrWhiteSpace(result.ReleaseUrl))
+            {
+                var answer = MessageBox.Show(
+                    this,
+                    $"{result.Message}\n\nOpen the release page?",
+                    "ZoneShift update",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Information);
+                if (answer == DialogResult.Yes)
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = result.ReleaseUrl,
+                        UseShellExecute = true
+                    });
+                }
+            }
+            else
+            {
+                MessageBox.Show(this, result.Message, "ZoneShift", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+
+            _statusLabel.Text = result.Message;
+            _statusLabel.ForeColor = UiTheme.TextMuted;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("Update check UI failed", ex);
+            _statusLabel.Text = "Update check failed.";
+            _statusLabel.ForeColor = UiTheme.Danger;
+        }
+        finally
+        {
+            _updateButton.Enabled = true;
+        }
+    }
+
+    private void RestoreWindowBounds()
+    {
+        if (_settings.WindowWidth >= 640 && _settings.WindowHeight >= 600 &&
+            _settings.WindowX >= 0 && _settings.WindowY >= 0 &&
+            IsOnScreen(_settings.WindowX, _settings.WindowY))
+        {
+            StartPosition = FormStartPosition.Manual;
+            Bounds = new Rectangle(_settings.WindowX, _settings.WindowY, _settings.WindowWidth, _settings.WindowHeight);
+        }
+        else
+        {
+            ClientSize = new Size(700, 780);
+        }
+    }
+
+    private void SaveWindowBounds()
+    {
+        if (WindowState != FormWindowState.Normal)
+            return;
+        _settings.WindowX = Left;
+        _settings.WindowY = Top;
+        _settings.WindowWidth = Width;
+        _settings.WindowHeight = Height;
     }
 
     private void ApplySettingsAndDefaults()
@@ -915,9 +1067,9 @@ public sealed class MainForm : Form
             ApplyTimePickerFormat();
 
             if (string.IsNullOrWhiteSpace(_settings.ReverseSourceWindowsId) ||
-                !SelectByWindowsId(_reverseSourceTimezone, _settings.ReverseSourceWindowsId!))
+                !_reverseSourceTimezone.SelectWindowsId(_settings.ReverseSourceWindowsId!))
             {
-                SelectByAbbreviation(_reverseSourceTimezone, "IST");
+                _reverseSourceTimezone.SelectAbbreviation("IST");
             }
 
             RebuildTargetRowsFromSettings();
@@ -993,7 +1145,7 @@ public sealed class MainForm : Form
                 _targetRows[i].SelectWindowsId(saved[i]);
 
             if (!string.IsNullOrWhiteSpace(_settings.ReverseSourceWindowsId))
-                SelectByWindowsId(_reverseSourceTimezone, _settings.ReverseSourceWindowsId!);
+                _reverseSourceTimezone.SelectWindowsId(_settings.ReverseSourceWindowsId!);
         }
         finally
         {
@@ -1034,14 +1186,8 @@ public sealed class MainForm : Form
             _settings.LiveMode = _liveMode;
             _settings.OverlayVisible = _overlayCheck.Checked || (_overlay is { Visible: true });
 
-            if (_reverseSourceTimezone.SelectedItem is TimezoneOption reverseOpt)
+            if (_reverseSourceTimezone.SelectedOption is TimezoneOption reverseOpt)
                 _settings.ReverseSourceWindowsId = reverseOpt.WindowsId;
-            else if (_reverseSourceTimezone.SelectedIndex >= 0 &&
-                     _reverseSourceTimezone.SelectedIndex < _reverseSourceTimezone.Items.Count &&
-                     _reverseSourceTimezone.Items[_reverseSourceTimezone.SelectedIndex] is TimezoneOption rev)
-            {
-                _settings.ReverseSourceWindowsId = rev.WindowsId;
-            }
 
             var ids = new List<string>();
             foreach (var row in _targetRows)
@@ -1055,6 +1201,7 @@ public sealed class MainForm : Form
             if (ids.Count > 0)
                 _settings.TargetWindowsIds = ids.ToArray();
 
+            SaveWindowBounds();
             SaveOverlayPlacement();
             _settings.Save();
         }
@@ -1095,7 +1242,17 @@ public sealed class MainForm : Form
             _overlay = new OverlayForm();
             _overlay.CloseRequested += OnOverlayCloseRequested;
             _overlay.OpenMainRequested += OnOverlayOpenMain;
-            _overlay.SetOpacity(_settings.OverlayOpacity);
+            _overlay.SettingsChanged += (_, _) =>
+            {
+                if (_overlay is null) return;
+                _settings.OverlayOpacity = _overlay.OverlayOpacity;
+                _settings.OverlayLocked = _overlay.IsLocked;
+                _settings.OverlayCompact = _overlay.IsCompact;
+                PersistSettings();
+            };
+            _overlay.OverlayOpacity = _settings.OverlayOpacity;
+            _overlay.IsLocked = _settings.OverlayLocked;
+            _overlay.IsCompact = _settings.OverlayCompact;
 
             if (_settings.OverlayX >= 0 && _settings.OverlayY >= 0 &&
                 IsOnScreen(_settings.OverlayX, _settings.OverlayY))
@@ -1104,7 +1261,6 @@ public sealed class MainForm : Form
             }
             else
             {
-                // Default: top-right of primary screen
                 var wa = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1200, 800);
                 _overlay.Location = new Point(wa.Right - _overlay.Width - 24, wa.Top + 24);
             }
@@ -1163,7 +1319,9 @@ public sealed class MainForm : Form
 
         _settings.OverlayX = _overlay.Location.X;
         _settings.OverlayY = _overlay.Location.Y;
-        _settings.OverlayOpacity = _overlay.Opacity;
+        _settings.OverlayOpacity = _overlay.OverlayOpacity;
+        _settings.OverlayLocked = _overlay.IsLocked;
+        _settings.OverlayCompact = _overlay.IsCompact;
     }
 
     private static bool IsOnScreen(int x, int y)
@@ -1205,14 +1363,14 @@ public sealed class MainForm : Form
 
     private TimeZoneInfo GetInputTimezone()
     {
-        if (ConvertToLocal && _reverseSourceTimezone.SelectedItem is TimezoneOption reverseOpt)
+        if (ConvertToLocal && _reverseSourceTimezone.SelectedOption is TimezoneOption reverseOpt)
             return reverseOpt.GetTimeZoneInfo();
         return _localTimezone;
     }
 
     private string GetInputTimezoneLabel()
     {
-        if (ConvertToLocal && _reverseSourceTimezone.SelectedItem is TimezoneOption reverseOpt)
+        if (ConvertToLocal && _reverseSourceTimezone.SelectedOption is TimezoneOption reverseOpt)
             return reverseOpt.Abbreviation;
         return "Local";
     }
@@ -1299,6 +1457,16 @@ public sealed class MainForm : Form
                 var overlayCaption = _liveMode ? "Your time - live" : "Your time - custom";
                 _overlay.UpdateDisplay(FormatDigitalTime(primaryTime), overlayCaption, overlayZones);
             }
+
+            // Build clipboard text
+            var lines = new List<string>
+            {
+                $"ZoneShift conversion ({primaryTime:yyyy-MM-dd})",
+                $"Local: {FormatDigitalTime(primaryTime)} ({TimeConversionService.FormatOffset(localOffset)})"
+            };
+            foreach (var z in overlayZones)
+                lines.Add($"{z.label}: {z.time} ({z.meta})");
+            _lastCopyText = string.Join(Environment.NewLine, lines);
 
             var mode = Use24Hour ? "24-hour" : "12-hour";
             _statusLabel.Text = ConvertToLocal

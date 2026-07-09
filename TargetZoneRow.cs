@@ -1,24 +1,29 @@
 namespace TimezoneConverter;
 
 /// <summary>
-/// One target row with clock right-aligned so long zone names never cover the time.
-/// Layout: [badge][combo........][offset][  CLOCK  ][x]
+/// One target row: [badge][timezone search][* fav][offset][clock][x]
 /// </summary>
 internal sealed class TargetZoneRow
 {
     public const int RowHeight = 46;
 
     public Control Root { get; }
-    public ClippedComboBox Combo { get; }
+    public SearchableTimezoneBox Combo { get; }
     public Label Meta { get; }
     public Button RemoveButton { get; }
+    public Button FavoriteButton { get; }
     public Label IndexBadge { get; }
     public ClockFace Clock { get; }
 
     private readonly Panel _clockPanel;
     private readonly Label _clockLabel;
 
-    public TargetZoneRow(IReadOnlyList<TimezoneOption> options, EventHandler onChanged, EventHandler onRemove)
+    public TargetZoneRow(
+        IReadOnlyList<TimezoneOption> options,
+        IEnumerable<string> favorites,
+        EventHandler onChanged,
+        EventHandler onRemove,
+        EventHandler onFavorite)
     {
         var row = new Panel
         {
@@ -39,24 +44,28 @@ internal sealed class TargetZoneRow
             Size = new Size(22, 24)
         };
 
-        Combo = new ClippedComboBox
+        Combo = new SearchableTimezoneBox
         {
             Font = UiTheme.BodyFont,
             Size = new Size(180, 26)
         };
-        // Use Items.Add (not DataSource) so selection works before the control handle exists
-        Combo.BeginUpdate();
-        try
-        {
-            foreach (var opt in options)
-                Combo.Items.Add(opt);
-        }
-        finally
-        {
-            Combo.EndUpdate();
-        }
-
+        Combo.SetOptions(options, favorites);
         Combo.SelectedIndexChanged += onChanged;
+        Combo.SelectionChangeCommitted += onChanged;
+
+        FavoriteButton = new Button
+        {
+            Text = "*",
+            Font = new Font("Segoe UI Semibold", 10f),
+            FlatStyle = FlatStyle.Flat,
+            ForeColor = UiTheme.Accent,
+            BackColor = UiTheme.AccentSoft,
+            Cursor = Cursors.Hand,
+            Size = new Size(26, 26),
+            TabStop = false
+        };
+        FavoriteButton.FlatAppearance.BorderSize = 0;
+        FavoriteButton.Click += onFavorite;
 
         Meta = new Label
         {
@@ -101,11 +110,11 @@ internal sealed class TargetZoneRow
         RemoveButton.FlatAppearance.BorderSize = 0;
         RemoveButton.Click += onRemove;
 
-        // Add clock before combo so combo never paints over it if bounds glitch
         row.Controls.Add(IndexBadge);
         row.Controls.Add(RemoveButton);
         row.Controls.Add(_clockPanel);
         row.Controls.Add(Meta);
+        row.Controls.Add(FavoriteButton);
         row.Controls.Add(Combo);
         row.Resize += (_, _) => LayoutRow(row.ClientSize.Width);
 
@@ -115,78 +124,54 @@ internal sealed class TargetZoneRow
 
     private void LayoutRow(int width)
     {
-        const int pad = 8;
+        const int pad = 6;
         const int badgeW = 22;
+        const int favW = 26;
         const int metaW = 64;
         const int clockW = 168;
         const int removeW = 28;
 
-        // Right-align remove + clock + meta so the time is always fully visible
         var xRemove = width - removeW - 2;
         var xClock = xRemove - pad - clockW;
         var xMeta = xClock - pad - metaW;
+        var xFav = xMeta - pad - favW;
         var xCombo = badgeW + pad + 2;
-        var comboW = Math.Max(100, xMeta - pad - xCombo);
+        var comboW = Math.Max(90, xFav - pad - xCombo);
 
         IndexBadge.SetBounds(2, (RowHeight - 24) / 2, badgeW, 24);
         Combo.SetBounds(xCombo, (RowHeight - 26) / 2, comboW, 26);
+        FavoriteButton.SetBounds(xFav, (RowHeight - 26) / 2, favW, 26);
         Meta.SetBounds(xMeta, (RowHeight - 22) / 2, metaW, 22);
         _clockPanel.SetBounds(xClock, (RowHeight - 34) / 2, clockW, 34);
         RemoveButton.SetBounds(xRemove, (RowHeight - 28) / 2, removeW, 28);
 
-        // Ensure clock is topmost in z-order
         _clockPanel.BringToFront();
         RemoveButton.BringToFront();
     }
 
-    public TimezoneOption? SelectedOption
-    {
-        get
-        {
-            if (Combo.SelectedItem is TimezoneOption opt)
-                return opt;
-            if (Combo.SelectedIndex >= 0 && Combo.SelectedIndex < Combo.Items.Count)
-                return Combo.Items[Combo.SelectedIndex] as TimezoneOption;
-            return null;
-        }
-    }
+    public TimezoneOption? SelectedOption => Combo.SelectedOption;
 
     public void SetIndex(int oneBased) => IndexBadge.Text = oneBased.ToString();
 
-    public bool SelectWindowsId(string windowsId)
+    public void RefreshFavoriteVisual(bool isFavorite)
     {
-        for (var i = 0; i < Combo.Items.Count; i++)
-        {
-            if (Combo.Items[i] is TimezoneOption opt &&
-                string.Equals(opt.WindowsId, windowsId, StringComparison.OrdinalIgnoreCase))
-            {
-                Combo.SelectedIndex = i;
-                return true;
-            }
-        }
-
-        return false;
+        FavoriteButton.Text = isFavorite ? "*" : "o";
+        FavoriteButton.BackColor = isFavorite ? Color.FromArgb(254, 243, 199) : UiTheme.AccentSoft;
+        FavoriteButton.ForeColor = isFavorite ? Color.FromArgb(180, 83, 9) : UiTheme.Accent;
     }
 
-    public bool SelectAbbreviation(string abbreviation)
+    public bool SelectWindowsId(string windowsId) => Combo.SelectWindowsId(windowsId);
+
+    public bool SelectAbbreviation(string abbreviation) => Combo.SelectAbbreviation(abbreviation);
+
+    public void ApplyFavorites(IEnumerable<string> favorites)
     {
-        for (var i = 0; i < Combo.Items.Count; i++)
-        {
-            if (Combo.Items[i] is TimezoneOption opt &&
-                string.Equals(opt.Abbreviation, abbreviation, StringComparison.OrdinalIgnoreCase))
-            {
-                Combo.SelectedIndex = i;
-                return true;
-            }
-        }
-
-        if (Combo.Items.Count > 0)
-        {
-            Combo.SelectedIndex = 0;
-            return false;
-        }
-
-        return false;
+        var id = SelectedOption?.WindowsId;
+        Combo.SetFavorites(favorites);
+        if (id is not null)
+            Combo.SelectWindowsId(id);
+        RefreshFavoriteVisual(id is not null &&
+            favorites.Any(f => string.Equals(f, id, StringComparison.OrdinalIgnoreCase)));
     }
 
     internal sealed class ClockFace

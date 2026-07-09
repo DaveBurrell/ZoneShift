@@ -17,28 +17,25 @@ public sealed class AppSettings
     };
 
     public bool Use24Hour { get; set; }
-
-    /// <summary>
-    /// true = enter time in another zone and convert to local;
-    /// false = enter local time and convert to other zones.
-    /// </summary>
     public bool ConvertToLocal { get; set; }
-
     public string? ReverseSourceWindowsId { get; set; }
-
     public string?[]? TargetWindowsIds { get; set; }
+    public string?[]? FavoriteWindowsIds { get; set; }
 
     public bool OverlayVisible { get; set; }
-
     public int OverlayX { get; set; } = -1;
     public int OverlayY { get; set; } = -1;
     public double OverlayOpacity { get; set; } = 0.94;
+    public bool OverlayLocked { get; set; }
+    public bool OverlayCompact { get; set; }
 
-    /// <summary>When true, close button minimizes to tray. When false, close exits.</summary>
     public bool CloseToTray { get; set; } = true;
-
-    /// <summary>Remember live vs custom mode across launches.</summary>
     public bool LiveMode { get; set; } = true;
+
+    public int WindowX { get; set; } = -1;
+    public int WindowY { get; set; } = -1;
+    public int WindowWidth { get; set; }
+    public int WindowHeight { get; set; }
 
     public static string SettingsDirectory
     {
@@ -53,7 +50,6 @@ public sealed class AppSettings
     }
 
     public static string SettingsPath => Path.Combine(SettingsDirectory, "settings.json");
-
     private static string BackupPath => Path.Combine(SettingsDirectory, "settings.bak.json");
 
     private static string LegacySettingsPath =>
@@ -126,14 +122,8 @@ public sealed class AppSettings
 
             if (File.Exists(path))
             {
-                try
-                {
-                    File.Copy(path, BackupPath, overwrite: true);
-                }
-                catch (Exception ex)
-                {
-                    AppLog.Warn($"Could not write settings backup: {ex.Message}");
-                }
+                try { File.Copy(path, BackupPath, overwrite: true); }
+                catch (Exception ex) { AppLog.Warn($"Could not write settings backup: {ex.Message}"); }
             }
 
             File.Copy(temp, path, overwrite: true);
@@ -154,5 +144,19 @@ public sealed class AppSettings
                 throw;
             }
         }
+    }
+
+    public bool IsFavorite(string windowsId) =>
+        FavoriteWindowsIds?.Any(id => string.Equals(id, windowsId, StringComparison.OrdinalIgnoreCase)) == true;
+
+    public void ToggleFavorite(string windowsId)
+    {
+        var list = FavoriteWindowsIds?.Where(id => !string.IsNullOrWhiteSpace(id)).ToList() ?? [];
+        var existing = list.FirstOrDefault(id => string.Equals(id, windowsId, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+            list.Remove(existing);
+        else
+            list.Add(windowsId);
+        FavoriteWindowsIds = list.ToArray();
     }
 }
