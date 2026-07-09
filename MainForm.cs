@@ -1,3 +1,5 @@
+using TimezoneConverter.Services;
+
 namespace TimezoneConverter;
 
 public sealed class MainForm : Form
@@ -151,12 +153,15 @@ public sealed class MainForm : Form
         };
         _trayOverlayItem.CheckedChanged += (_, _) =>
         {
+            if (_suppressEvents)
+                return;
             if (_trayOverlayItem.Checked)
                 ShowOverlay();
             else
                 HideOverlay();
         };
         _trayMenu.Items.Add(_trayOverlayItem);
+        _trayMenu.Items.Add("About ZoneShift...", null, (_, _) => ShowAbout());
         _trayMenu.Items.Add(new ToolStripSeparator());
         _trayMenu.Items.Add("Exit", null, (_, _) => ExitApplication());
 
@@ -178,7 +183,7 @@ public sealed class MainForm : Form
         SaveOverlayPlacement();
         PersistSettings();
 
-        if (!_exitRequested && e.CloseReason == CloseReason.UserClosing)
+        if (!_exitRequested && e.CloseReason == CloseReason.UserClosing && _settings.CloseToTray)
         {
             e.Cancel = true;
             MinimizeToTray(showTip: true);
@@ -331,11 +336,23 @@ public sealed class MainForm : Form
         _overlayCheck.Location = new Point(12, 68);
         _overlayCheck.CheckedChanged += OnOverlayCheckChanged;
 
+        var aboutLink = new LinkLabel
+        {
+            Text = "About / diagnostics",
+            Location = new Point(380, 70),
+            AutoSize = true,
+            LinkColor = UiTheme.Accent,
+            ActiveLinkColor = UiTheme.Accent,
+            BackColor = UiTheme.CardBackground
+        };
+        aboutLink.LinkClicked += (_, _) => ShowAbout();
+
         optionsCard.Controls.Add(dirCap);
         optionsCard.Controls.Add(_directionToggle);
         optionsCard.Controls.Add(fmtCap);
         optionsCard.Controls.Add(_formatToggle);
         optionsCard.Controls.Add(_overlayCheck);
+        optionsCard.Controls.Add(aboutLink);
         optionsWrap.Controls.Add(optionsCard);
         Controls.Add(optionsWrap);
 
@@ -851,7 +868,7 @@ public sealed class MainForm : Form
     private void ShowDetectedLocalTimezone()
     {
         var offset = _localTimezone.GetUtcOffset(DateTime.Now);
-        _localTimezoneLabel.Text = $"{_localTimezone.DisplayName}  -  {FormatOffset(offset)}";
+        _localTimezoneLabel.Text = $"{_localTimezone.DisplayName}  -  {TimeConversionService.FormatOffset(offset)}";
     }
 
     private void LoadTimezones()
@@ -888,12 +905,13 @@ public sealed class MainForm : Form
             _directionToggle.RightSelected = _settings.ConvertToLocal;
             _overlayCheck.Checked = _settings.OverlayVisible;
 
-            _liveMode = true;
-            _liveModeCheck.Checked = true;
-            _datePicker.Enabled = false;
-            _timeEntry.Enabled = false;
-            _useNowButton.Visible = false;
-            SyncPickersToNow();
+            _liveMode = _settings.LiveMode;
+            _liveModeCheck.Checked = _liveMode;
+            _datePicker.Enabled = !_liveMode;
+            _timeEntry.Enabled = !_liveMode;
+            _useNowButton.Visible = !_liveMode;
+            if (_liveMode)
+                SyncPickersToNow();
             ApplyTimePickerFormat();
 
             if (string.IsNullOrWhiteSpace(_settings.ReverseSourceWindowsId) ||
@@ -1013,6 +1031,7 @@ public sealed class MainForm : Form
         {
             _settings.Use24Hour = Use24Hour;
             _settings.ConvertToLocal = ConvertToLocal;
+            _settings.LiveMode = _liveMode;
             _settings.OverlayVisible = _overlayCheck.Checked || (_overlay is { Visible: true });
 
             if (_reverseSourceTimezone.SelectedItem is TimezoneOption reverseOpt)
@@ -1039,10 +1058,21 @@ public sealed class MainForm : Form
             SaveOverlayPlacement();
             _settings.Save();
         }
-        catch
+        catch (Exception ex)
         {
-            // Preferences are best-effort
+            AppLog.Error("PersistSettings failed", ex);
+            if (_statusLabel is not null)
+            {
+                _statusLabel.Text = "Could not save preferences - see logs (About / diagnostics).";
+                _statusLabel.ForeColor = UiTheme.Danger;
+            }
         }
+    }
+
+    private void ShowAbout()
+    {
+        using var dlg = new AboutForm();
+        dlg.ShowDialog(this);
     }
 
     private void OnOverlayCheckChanged(object? sender, EventArgs e)
@@ -1195,44 +1225,8 @@ public sealed class MainForm : Form
         try
         {
             var inputTz = GetInputTimezone();
-            DateTime inputWall;
-            DateTime utc;
-
-            if (_liveMode)
-            {
-                var nowLocal = DateTime.Now;
-                utc = nowLocal.ToUniversalTime();
-                inputWall = TimeZoneInfo.ConvertTimeFromUtc(utc, inputTz);
-            }
-            else
-            {
-                inputWall = _datePicker.Value.Date + _timeEntry.TimeOfDay;
-                var unspecified = DateTime.SpecifyKind(inputWall, DateTimeKind.Unspecified);
-                utc = TimeZoneInfo.ConvertTimeToUtc(unspecified, inputTz);
-            }
-
-            var primaryTime = TimeZoneInfo.ConvertTimeFromUtc(utc, _localTimezone);
-            var localOffset = _localTimezone.GetUtcOffset(primaryTime);
-            var inputLabel = GetInputTimezoneLabel();
-
-            string primaryCaption;
-            if (ConvertToLocal)
-            {
-                primaryCaption = _liveMode
-                    ? $"Your local (live)  -  {primaryTime:ddd d MMM}  -  {FormatOffset(localOffset)}"
-                    : $"{FormatDigitalTime(inputWall)} {inputLabel} -> local  -  {primaryTime:ddd d MMM}  -  {FormatOffset(localOffset)}";
-            }
-            else
-            {
-                primaryCaption = _liveMode
-                    ? $"Live now  -  {primaryTime:ddd d MMM}  -  {FormatOffset(localOffset)}"
-                    : $"Custom local  -  {primaryTime:ddd d MMM}  -  {FormatOffset(localOffset)}";
-            }
-
-            _primaryClock.TimeText = FormatDigitalTime(primaryTime);
-            _primaryClock.CaptionText = primaryCaption;
-
-            var overlayZones = new List<(string label, string time, string meta)>();
+            var targets = new List<(string Abbreviation, string WindowsId, TimeZoneInfo Zone)>();
+            var rowMap = new List<TargetZoneRow?>();
 
             foreach (var row in _targetRows)
             {
@@ -1240,21 +1234,64 @@ public sealed class MainForm : Form
                 {
                     row.Clock.TimeText = "--:--";
                     row.Meta.Text = string.Empty;
+                    rowMap.Add(null);
                     continue;
                 }
 
-                var targetTz = targetOpt.GetTimeZoneInfo();
-                var converted = TimeZoneInfo.ConvertTimeFromUtc(utc, targetTz);
-                var offset = targetTz.GetUtcOffset(converted);
-                var dayNote = DayDeltaNote(primaryTime.Date, converted.Date);
+                targets.Add((targetOpt.Abbreviation, targetOpt.WindowsId, targetOpt.GetTimeZoneInfo()));
+                rowMap.Add(row);
+            }
+
+            ConversionSnapshot snapshot;
+            if (_liveMode)
+            {
+                snapshot = TimeConversionService.ConvertLiveNow(inputTz, _localTimezone, targets);
+            }
+            else
+            {
+                var inputWall = _datePicker.Value.Date + _timeEntry.TimeOfDay;
+                snapshot = TimeConversionService.Convert(inputWall, inputTz, _localTimezone, targets);
+            }
+
+            var primaryTime = snapshot.PrimaryLocalTime;
+            var localOffset = snapshot.PrimaryUtcOffset;
+            var inputLabel = GetInputTimezoneLabel();
+            var inputWallTime = snapshot.InputWallTime;
+
+            string primaryCaption;
+            if (ConvertToLocal)
+            {
+                primaryCaption = _liveMode
+                    ? $"Your local (live)  -  {primaryTime:ddd d MMM}  -  {TimeConversionService.FormatOffset(localOffset)}"
+                    : $"{FormatDigitalTime(inputWallTime)} {inputLabel} -> local  -  {primaryTime:ddd d MMM}  -  {TimeConversionService.FormatOffset(localOffset)}";
+            }
+            else
+            {
+                primaryCaption = _liveMode
+                    ? $"Live now  -  {primaryTime:ddd d MMM}  -  {TimeConversionService.FormatOffset(localOffset)}"
+                    : $"Custom local  -  {primaryTime:ddd d MMM}  -  {TimeConversionService.FormatOffset(localOffset)}";
+            }
+
+            _primaryClock.TimeText = FormatDigitalTime(primaryTime);
+            _primaryClock.CaptionText = primaryCaption;
+
+            var overlayZones = new List<(string label, string time, string meta)>();
+            var resultIndex = 0;
+            for (var i = 0; i < rowMap.Count; i++)
+            {
+                var row = rowMap[i];
+                if (row is null)
+                    continue;
+
+                var r = snapshot.Targets[resultIndex++];
+                var dayNote = TimeConversionService.FormatDayDelta(r.DayDeltaFromPrimary);
                 var meta = string.IsNullOrEmpty(dayNote)
-                    ? FormatOffset(offset)
-                    : $"{FormatOffset(offset)}{dayNote}";
+                    ? TimeConversionService.FormatOffset(r.UtcOffset)
+                    : $"{TimeConversionService.FormatOffset(r.UtcOffset)}{dayNote}";
 
-                row.Clock.TimeText = FormatDigitalTime(converted);
+                row.Clock.TimeText = FormatDigitalTime(r.LocalWallTime);
                 row.Meta.Text = meta;
-
-                overlayZones.Add((targetOpt.Abbreviation, FormatDigitalTime(converted), meta));
+                overlayZones.Add((r.Abbreviation, FormatDigitalTime(r.LocalWallTime), meta));
             }
 
             if (_overlay is { Visible: true, IsDisposed: false })
@@ -1275,38 +1312,14 @@ public sealed class MainForm : Form
         }
         catch (Exception ex)
         {
+            AppLog.Error("RefreshDisplays failed", ex);
             _statusLabel.Text = $"Could not convert: {ex.Message}";
             _statusLabel.ForeColor = UiTheme.Danger;
         }
     }
 
-    private string FormatDigitalTime(DateTime time)
-    {
-        if (_liveMode)
-            return Use24Hour ? time.ToString("HH:mm:ss") : time.ToString("hh:mm:ss tt");
-        return Use24Hour ? time.ToString("HH:mm") : time.ToString("hh:mm tt");
-    }
-
-    private static string FormatOffset(TimeSpan offset)
-    {
-        var sign = offset < TimeSpan.Zero ? "-" : "+";
-        var abs = offset.Duration();
-        return abs.Minutes == 0
-            ? $"UTC{sign}{abs.Hours}"
-            : $"UTC{sign}{abs.Hours}:{abs.Minutes:D2}";
-    }
-
-    private static string DayDeltaNote(DateTime sourceDate, DateTime targetDate)
-    {
-        var days = (targetDate - sourceDate).Days;
-        return days switch
-        {
-            0 => string.Empty,
-            1 => " +1d",
-            -1 => " -1d",
-            > 1 => $" +{days}d",
-            _ => $" {days}d"
-        };
-    }
+    private string FormatDigitalTime(DateTime time) =>
+        TimeConversionService.FormatDigital(time, Use24Hour, includeSeconds: _liveMode);
 }
+
 

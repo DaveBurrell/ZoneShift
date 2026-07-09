@@ -48,7 +48,7 @@ powershell -ExecutionPolicy Bypass -File .\pack-installer.ps1
 
 Output:
 
-`C:\Users\davej\source\TimezoneConverter\dist\ZoneShift-Setup-1.1.2.exe`
+`C:\Users\davej\source\TimezoneConverter\dist\ZoneShift-Setup-1.2.0.exe`
 
 The installer:
 - Installs under `Program Files` or per-user (standard wizard)
@@ -73,3 +73,4 @@ They update automatically when you change target zones, direction, or the 12h/24
 
 - **CST** means US Central Time. China Standard Time is listed as **CST-CN**.
 - Timezone data comes from Windows (`TimeZoneInfo`).
+

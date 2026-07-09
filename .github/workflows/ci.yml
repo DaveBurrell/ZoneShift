@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  release:
+    types: [published]
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore ZoneShift.sln
+
+      - name: Build
+        run: dotnet build ZoneShift.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test ZoneShift.sln -c Release --no-build --verbosity normal
+
+      - name: Publish self-contained
+        run: >
+          dotnet publish TimezoneConverter.csproj -c Release -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -o publish/win-x64
+
+      - name: Upload published exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZoneShift-win-x64
+          path: publish/win-x64/ZoneShift.exe

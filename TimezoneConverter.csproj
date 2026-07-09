@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -11,13 +11,12 @@
     <RootNamespace>TimezoneConverter</RootNamespace>
     <Product>ZoneShift</Product>
     <AssemblyTitle>ZoneShift</AssemblyTitle>
-    <Description>ZoneShift â€” convert times across timezones with live digital clocks</Description>
-    <Version>1.1.2</Version>
+    <Description>ZoneShift - convert times across timezones with live digital clocks</Description>
+    <Version>1.2.0</Version>
     <Company>ZoneShift</Company>
-    <Copyright>Copyright Â© ZoneShift</Copyright>
+    <Copyright>Copyright (c) ZoneShift</Copyright>
   </PropertyGroup>
 
-  <!-- Single-file publish defaults (used by pack-installer.ps1) -->
   <PropertyGroup Condition="'$(PublishSingleFile)' == 'true'">
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
@@ -30,10 +29,10 @@
     <None Update="Assets\app.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <!-- Helper utilities under tools/ are not part of the app build -->
     <Compile Remove="tools\**\*" />
     <None Include="tools\**\*" />
+    <Compile Remove="tests\**\*" />
+    <None Include="tests\**\*" />
   </ItemGroup>
 
 </Project>
-

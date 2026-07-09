@@ -2,7 +2,7 @@
 ; Source files come from: ..\publish\win-x64\
 
 #define MyAppName "ZoneShift"
-#define MyAppVersion "1.1.2"
+#define MyAppVersion "1.2.0"
 #define MyAppPublisher "ZoneShift"
 #define MyAppExeName "ZoneShift.exe"
 

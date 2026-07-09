@@ -1,4 +1,4 @@
-﻿# Builds ZoneShift and produces a single-file installer: dist\ZoneShift-Setup-1.1.2.exe
+﻿# Builds ZoneShift and produces a single-file installer: dist\ZoneShift-Setup-1.2.0.exe
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
@@ -20,7 +20,7 @@ if (Test-Path $publishDir) { Remove-Item $publishDir -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $publishDir | Out-Null
 New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 
-dotnet publish `
+dotnet publish ".\TimezoneConverter.csproj" `
     -c Release `
     -r win-x64 `
     --self-contained true `
