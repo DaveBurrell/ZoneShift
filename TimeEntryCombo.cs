@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Globalization;
 
 namespace TimezoneConverter;
@@ -44,12 +45,16 @@ internal sealed class TimeEntryCombo : ComboBox
         };
     }
 
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    [Browsable(false)]
     public TimeSpan TimeOfDay
     {
         get => _timeOfDay;
         set => SetTimeInternal(Normalize(value), raiseEvent: false, updateText: true);
     }
 
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    [Browsable(false)]
     public bool Use24Hour
     {
         get => _use24Hour;
@@ -63,6 +68,8 @@ internal sealed class TimeEntryCombo : ComboBox
         }
     }
 
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    [Browsable(false)]
     public bool IncludeSeconds
     {
         get => _includeSeconds;

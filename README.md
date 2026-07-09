@@ -18,7 +18,7 @@ A polished Windows desktop app that converts a time in **your PC timezone** into
 ## Requirements
 
 - Windows 10/11
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) (to build)
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) (to build)
 
 ## Run
 
@@ -29,7 +29,7 @@ dotnet run
 
 Or launch:
 
-`C:\Users\davej\source\TimezoneConverter\bin\Release\net8.0-windows\ZoneShift.exe`
+`C:\Users\davej\source\TimezoneConverter\bin\Release\net10.0-windows\ZoneShift.exe`
 
 ## Build
 
@@ -48,7 +48,7 @@ powershell -ExecutionPolicy Bypass -File .\pack-installer.ps1
 
 Output:
 
-`C:\Users\davej\source\TimezoneConverter\dist\ZoneShift-Setup-1.0.0.exe`
+`C:\Users\davej\source\TimezoneConverter\dist\ZoneShift-Setup-1.1.0.exe`
 
 The installer:
 - Installs under `Program Files` or per-user (standard wizard)

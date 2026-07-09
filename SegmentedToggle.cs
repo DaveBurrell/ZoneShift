@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 namespace TimezoneConverter;
 
 /// <summary>
@@ -32,6 +34,8 @@ internal sealed class SegmentedToggle : Panel
         ApplyVisuals();
     }
 
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    [Browsable(false)]
     public bool RightSelected
     {
         get => _rightSelected;
@@ -44,6 +48,8 @@ internal sealed class SegmentedToggle : Panel
         }
     }
 
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    [Browsable(false)]
     public bool LeftSelected
     {
         get => !_rightSelected;

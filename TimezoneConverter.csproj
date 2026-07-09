@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -12,7 +12,7 @@
     <Product>ZoneShift</Product>
     <AssemblyTitle>ZoneShift</AssemblyTitle>
     <Description>ZoneShift — convert times across timezones with live digital clocks</Description>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Company>ZoneShift</Company>
     <Copyright>Copyright © ZoneShift</Copyright>
   </PropertyGroup>

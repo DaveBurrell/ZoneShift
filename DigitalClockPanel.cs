@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 namespace TimezoneConverter;
 
 /// <summary>
@@ -47,12 +49,16 @@ internal sealed class DigitalClockPanel : Panel
         }
     }
 
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    [Browsable(false)]
     public string TimeText
     {
         get => _timeLabel.Text;
         set => _timeLabel.Text = value;
     }
 
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    [Browsable(false)]
     public string CaptionText
     {
         get => _captionLabel?.Text ?? string.Empty;
