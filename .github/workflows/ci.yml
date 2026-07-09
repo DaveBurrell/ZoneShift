@@ -27,7 +27,7 @@ jobs:
       - name: Test
         run: dotnet test ZoneShift.sln -c Release --no-build --verbosity normal
 
-      - name: Publish self-contained
+      - name: Publish win-x64
         run: >
           dotnet publish TimezoneConverter.csproj -c Release -r win-x64
           --self-contained true
@@ -36,8 +36,19 @@ jobs:
           -p:EnableCompressionInSingleFile=true
           -o publish/win-x64
 
-      - name: Upload published exe
+      - name: Publish win-arm64
+        run: >
+          dotnet publish TimezoneConverter.csproj -c Release -r win-arm64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -o publish/win-arm64
+
+      - name: Upload published exes
         uses: actions/upload-artifact@v4
         with:
-          name: ZoneShift-win-x64
-          path: publish/win-x64/ZoneShift.exe
+          name: ZoneShift-publish
+          path: |
+            publish/win-x64/ZoneShift.exe
+            publish/win-arm64/ZoneShift.exe

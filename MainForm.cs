@@ -59,20 +59,18 @@ public sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
-        // Absolute layout - no autoscaling (prevents collapsed/overlapping sections)
-        AutoScaleMode = AutoScaleMode.None;
+        // Design for 96 DPI; PerMonitorV2 scales via Dpi AutoScaleMode
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
         Font = UiTheme.BodyFont;
         BackColor = UiTheme.AppBackground;
         DoubleBuffered = true;
         ShowInTaskbar = true;
         ClientSize = new Size(700, 780);
-        MinimumSize = new Size(680, 720);
+        MinimumSize = new Size(640, 640);
 
         ApplyAppIcon();
         BuildUi();
-
-        // Size after controls are added so layout isn't crushed
-        ClientSize = new Size(700, 780);
 
         SetupTrayIcon();
         ShowDetectedLocalTimezone();
@@ -984,17 +982,25 @@ public sealed class MainForm : Form
         _statusLabel.ForeColor = UiTheme.TextMuted;
         try
         {
-            var version = typeof(MainForm).Assembly.GetName().Version?.ToString(3) ?? "1.2.0";
+            var version = typeof(MainForm).Assembly.GetName().Version?.ToString(3) ?? "1.4.0";
             var result = await UpdateChecker.CheckAsync(version);
-            if (result.UpdateAvailable && !string.IsNullOrWhiteSpace(result.ReleaseUrl))
+            if (!result.UpdateAvailable)
             {
-                var answer = MessageBox.Show(
+                MessageBox.Show(this, result.Message, "ZoneShift", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                _statusLabel.Text = result.Message;
+                _statusLabel.ForeColor = UiTheme.TextMuted;
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(result.SetupDownloadUrl))
+            {
+                var openOnly = MessageBox.Show(
                     this,
-                    $"{result.Message}\n\nOpen the release page?",
+                    $"{result.Message}\n\nNo installer asset found for {UpdateChecker.CurrentArchitectureLabel}.\nOpen the release page?",
                     "ZoneShift update",
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Information);
-                if (answer == DialogResult.Yes)
+                if (openOnly == DialogResult.Yes && !string.IsNullOrWhiteSpace(result.ReleaseUrl))
                 {
                     System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                     {
@@ -1002,20 +1008,52 @@ public sealed class MainForm : Form
                         UseShellExecute = true
                     });
                 }
-            }
-            else
-            {
-                MessageBox.Show(this, result.Message, "ZoneShift", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
             }
 
-            _statusLabel.Text = result.Message;
-            _statusLabel.ForeColor = UiTheme.TextMuted;
+            var answer = MessageBox.Show(
+                this,
+                $"{result.Message}\n\nDownload and install {result.SetupFileName} now?\nZoneShift will close and the installer will run silently.",
+                "ZoneShift update",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (answer != DialogResult.Yes)
+            {
+                if (!string.IsNullOrWhiteSpace(result.ReleaseUrl))
+                {
+                    var open = MessageBox.Show(this, "Open the release page instead?", "ZoneShift",
+                        MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                    if (open == DialogResult.Yes)
+                    {
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = result.ReleaseUrl,
+                            UseShellExecute = true
+                        });
+                    }
+                }
+                return;
+            }
+
+            var progress = new Progress<string>(msg =>
+            {
+                _statusLabel.Text = msg;
+                _statusLabel.ForeColor = UiTheme.TextMuted;
+            });
+
+            await UpdateChecker.InstallUpdateAsync(result.SetupDownloadUrl!, result.SetupFileName, progress);
+            // Installer was launched with CLOSEAPPLICATIONS — exit cleanly
+            _exitRequested = true;
+            PersistSettings();
+            Application.Exit();
         }
         catch (Exception ex)
         {
-            AppLog.Error("Update check UI failed", ex);
-            _statusLabel.Text = "Update check failed.";
+            AppLog.Error("Update check/install UI failed", ex);
+            _statusLabel.Text = "Update failed - see logs.";
             _statusLabel.ForeColor = UiTheme.Danger;
+            MessageBox.Show(this, $"Update failed:\n{ex.Message}", "ZoneShift", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         finally
         {

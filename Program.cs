@@ -14,10 +14,10 @@ static class Program
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            // GDI-scaled unaware: sharper than pure DpiUnaware, avoids crushing absolute layouts
-            Application.SetHighDpiMode(HighDpiMode.DpiUnawareGdiScaled);
+            // Proper per-monitor DPI; form uses AutoScaleMode.Dpi at 96 design units
+            Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
 
-            AppLog.Info("ZoneShift starting.");
+            AppLog.Info($"ZoneShift starting (arch={UpdateChecker.CurrentArchitectureLabel}).");
             Application.ApplicationExit += (_, _) =>
             {
                 AppLog.Info("ZoneShift exiting.");

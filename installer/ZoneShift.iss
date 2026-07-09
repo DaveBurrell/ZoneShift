@@ -1,8 +1,19 @@
 ; ZoneShift installer - compiled by Inno Setup 6
-; Source files come from: ..\publish\win-x64\
+; Pass architecture defines from pack-installer.ps1:
+;   ISCC /DAppArch=x64 /DPublishDir=..\publish\win-x64 /DMyAppVersion=1.4.0 ZoneShift.iss
+;   ISCC /DAppArch=arm64 /DPublishDir=..\publish\win-arm64 /DMyAppVersion=1.4.0 ZoneShift.iss
+
+#ifndef MyAppVersion
+  #define MyAppVersion "1.4.0"
+#endif
+#ifndef AppArch
+  #define AppArch "x64"
+#endif
+#ifndef PublishDir
+  #define PublishDir "..\publish\win-x64"
+#endif
 
 #define MyAppName "ZoneShift"
-#define MyAppVersion "1.3.0"
 #define MyAppPublisher "ZoneShift"
 #define MyAppExeName "ZoneShift.exe"
 
@@ -10,28 +21,31 @@
 AppId={{A7C3E9F1-4B2D-4E8A-9C1F-6D5E8A2B3C40}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-AppVerName={#MyAppName} {#MyAppVersion}
+AppVerName={#MyAppName} {#MyAppVersion} ({#AppArch})
 AppPublisher={#MyAppPublisher}
 DefaultDirName={localappdata}\Programs\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=..\dist
-OutputBaseFilename=ZoneShift-Setup-{#MyAppVersion}
+OutputBaseFilename=ZoneShift-Setup-{#MyAppVersion}-{#AppArch}
 SetupIconFile=..\Assets\app.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
-; Per-user install works without UAC and still gets a Start Menu entry
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
+#if AppArch == "arm64"
+ArchitecturesAllowed=arm64
+ArchitecturesInstallIn64BitMode=arm64
+#else
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+#endif
 MinVersion=10.0
 CloseApplications=yes
 RestartApplications=no
 ChangesAssociations=no
-; Always create icons even when reinstalling
 AllowNoIcons=no
 
 [Languages]
@@ -42,15 +56,12 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "startupicon"; Description: "Start ZoneShift when I sign in to Windows"; GroupDescription: "Startup:"; Flags: unchecked
 
 [Files]
-Source: "..\publish\win-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-; Direct Start Menu entry (shows clearly on Windows 10/11)
 Name: "{userprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"
-; Also create a ZoneShift folder with app + uninstall (classic layout)
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
-; Optional desktop / startup
 Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: startupicon
 
