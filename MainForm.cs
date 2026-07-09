@@ -72,6 +72,8 @@ public sealed class MainForm : Form
     private bool _suppressEvents;
     private bool _ready;
     private bool _liveMode = true;
+    /// <summary>True after target zone combos have been restored from disk (safe to persist zones).</summary>
+    private bool _zonesHydrated;
 
     private const int MinTargetZones = 1;
     private const int MaxTargetZones = 8;
@@ -127,7 +129,18 @@ public sealed class MainForm : Form
             RebuildTargetListUi();
             RefreshFavoriteVisuals();
             RefreshDisplays();
-            PersistSettings();
+            // Do NOT PersistSettings here — combos may not be fully selected yet and
+            // would overwrite good on-disk zone lists with incomplete UI state.
+            // Window bounds only (non-destructive):
+            try
+            {
+                SaveWindowBounds();
+                _settings.Save();
+            }
+            catch (Exception ex)
+            {
+                AppLog.Warn($"Could not save window bounds on show: {ex.Message}");
+            }
 
             if (!_settings.HasSeenOnboarding)
                 BeginInvoke(() => ShowOnboarding(force: false));
@@ -1407,6 +1420,11 @@ public sealed class MainForm : Form
                 return;
             }
 
+            // Critical: flush preferences BEFORE the installer can force-close this process.
+            // FORCECLOSEAPPLICATIONS can kill ZoneShift mid-write if we only save after launch.
+            PersistSettings(forceZones: true);
+            AppLog.Info("Preferences flushed before update install.");
+
             var progress = new Progress<string>(msg =>
             {
                 _statusLabel.Text = msg;
@@ -1416,7 +1434,7 @@ public sealed class MainForm : Form
             await UpdateChecker.InstallUpdateAsync(result.SetupDownloadUrl!, result.SetupFileName, progress);
             // Exit so the installer can replace files; silent [Run] relaunches ZoneShift.
             _exitRequested = true;
-            PersistSettings();
+            PersistSettings(forceZones: true);
             try { SingleInstance.Release(); } catch { /* ignore */ }
             Application.Exit();
         }
@@ -1533,7 +1551,10 @@ public sealed class MainForm : Form
             .ToList();
 
         if (saved.Count == 0)
+        {
+            _zonesHydrated = true;
             return;
+        }
 
         // If row count does not match, rebuild from settings
         if (_targetRows.Count != saved.Count)
@@ -1552,16 +1573,43 @@ public sealed class MainForm : Form
         _suppressEvents = true;
         try
         {
+            var ok = 0;
             for (var i = 0; i < Math.Min(_targetRows.Count, saved.Count); i++)
-                _targetRows[i].SelectWindowsId(saved[i]);
+            {
+                if (_targetRows[i].SelectWindowsId(saved[i]))
+                    ok++;
+                else
+                    AppLog.Warn($"Could not restore zone row {i + 1}: {saved[i]}");
+            }
 
             if (!string.IsNullOrWhiteSpace(_settings.ReverseSourceWindowsId))
                 _reverseSourceTimezone.SelectWindowsId(_settings.ReverseSourceWindowsId!);
+
+            _zonesHydrated = ok == saved.Count || ok == _targetRows.Count;
+            AppLog.Info($"Restored zone selections: {ok}/{saved.Count} (hydrated={_zonesHydrated}).");
         }
         finally
         {
             _suppressEvents = false;
         }
+
+        // Retry once after layout so combo handles are fully ready
+        BeginInvoke(() =>
+        {
+            if (IsDisposed) return;
+            _suppressEvents = true;
+            try
+            {
+                for (var i = 0; i < Math.Min(_targetRows.Count, saved.Count); i++)
+                    _targetRows[i].SelectWindowsId(saved[i]);
+                _zonesHydrated = true;
+            }
+            finally
+            {
+                _suppressEvents = false;
+            }
+            RefreshDisplays();
+        });
     }
 
     private void SyncPickersToNow()
@@ -1588,19 +1636,25 @@ public sealed class MainForm : Form
         }
     }
 
-    private void PersistSettings()
+    private void PersistSettings(bool forceZones = false)
     {
         try
         {
-            _settings.Use24Hour = Use24Hour;
-            _settings.ConvertToLocal = ConvertToLocal;
-            _settings.LiveMode = _liveMode;
-            _settings.CloseToTray = _closeToTrayCheck.Checked;
-            _settings.OverlayVisible = _overlayCheck.Checked || (_overlay is { Visible: true });
+            if (_ready)
+            {
+                _settings.Use24Hour = Use24Hour;
+                _settings.ConvertToLocal = ConvertToLocal;
+                _settings.LiveMode = _liveMode;
+                if (_closeToTrayCheck is not null)
+                    _settings.CloseToTray = _closeToTrayCheck.Checked;
+                if (_overlayCheck is not null)
+                    _settings.OverlayVisible = _overlayCheck.Checked || (_overlay is { Visible: true });
+            }
 
             if (_reverseSourceTimezone.SelectedOption is TimezoneOption reverseOpt)
                 _settings.ReverseSourceWindowsId = reverseOpt.WindowsId;
 
+            // Collect zone IDs from UI only when every row has a selection (or forceZones on exit/update)
             var ids = new List<string>();
             foreach (var row in _targetRows)
             {
@@ -1609,12 +1663,36 @@ public sealed class MainForm : Form
                     ids.Add(id);
             }
 
-            // Never wipe saved zones with an empty list due to a transient UI state
-            if (ids.Count > 0)
-                _settings.TargetWindowsIds = ids.ToArray();
+            var previousCount = _settings.TargetWindowsIds?.Count(id => !string.IsNullOrWhiteSpace(id)) ?? 0;
+            var uiComplete = _targetRows.Count > 0 && ids.Count == _targetRows.Count;
 
-            SaveWindowBounds();
-            SaveOverlayPlacement();
+            if (uiComplete && (_zonesHydrated || forceZones || ids.Count >= previousCount))
+            {
+                _settings.TargetWindowsIds = ids.ToArray();
+            }
+            else if (ids.Count > 0 && forceZones && ids.Count >= previousCount)
+            {
+                // Exit/update path: accept full or larger list even if not marked hydrated
+                _settings.TargetWindowsIds = ids.ToArray();
+            }
+            else if (ids.Count > 0 && ids.Count < previousCount && !forceZones)
+            {
+                // Incomplete UI — keep previous TargetWindowsIds (do not shrink)
+                AppLog.Warn(
+                    $"Skip zone persist: UI has {ids.Count} selected of {_targetRows.Count} rows " +
+                    $"(disk has {previousCount}). Keeping previous list.");
+            }
+            else if (ids.Count == 0 && previousCount > 0)
+            {
+                AppLog.Warn("Skip zone persist: no rows selected in UI; keeping previous TargetWindowsIds.");
+            }
+
+            if (_ready)
+            {
+                SaveWindowBounds();
+                SaveOverlayPlacement();
+            }
+
             _settings.Save();
         }
         catch (Exception ex)

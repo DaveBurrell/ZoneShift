@@ -4,6 +4,7 @@ namespace TimezoneConverter;
 
 /// <summary>
 /// Type-to-filter timezone dropdown. Favorites appear first (starred in list text).
+/// Remembers a pending Windows ID so selection survives handle creation / refilters.
 /// </summary>
 internal sealed class SearchableTimezoneBox : ComboBox
 {
@@ -11,17 +12,17 @@ internal sealed class SearchableTimezoneBox : ComboBox
     private HashSet<string> _favorites = new(StringComparer.OrdinalIgnoreCase);
     private bool _filtering;
     private string _filter = "";
+    private string? _pendingWindowsId;
 
     public SearchableTimezoneBox()
     {
         DrawMode = DrawMode.OwnerDrawFixed;
-        DropDownStyle = ComboBoxStyle.DropDown; // allows typing to filter
+        DropDownStyle = ComboBoxStyle.DropDown;
         IntegralHeight = false;
         MaxDropDownItems = 16;
         FlatStyle = FlatStyle.Flat;
         ItemHeight = 22;
         AutoCompleteMode = AutoCompleteMode.None;
-        // Light text on dark field — avoids default black-on-dark
         BackColor = UiTheme.InputBack;
         ForeColor = UiTheme.TextPrimary;
 
@@ -31,15 +32,10 @@ internal sealed class SearchableTimezoneBox : ComboBox
         {
             if (SelectedItem is TimezoneOption opt)
             {
+                _pendingWindowsId = opt.WindowsId;
                 _filtering = true;
-                try
-                {
-                    Text = opt.ToString();
-                }
-                finally
-                {
-                    _filtering = false;
-                }
+                try { Text = FormatOption(opt); }
+                finally { _filtering = false; }
             }
         };
         Leave += (_, _) => CommitSelectionFromText();
@@ -50,6 +46,12 @@ internal sealed class SearchableTimezoneBox : ComboBox
                 CommitSelectionFromText();
                 e.SuppressKeyPress = true;
             }
+        };
+        HandleCreated += (_, _) => TryApplyPendingSelection();
+        VisibleChanged += (_, _) =>
+        {
+            if (Visible)
+                TryApplyPendingSelection();
         };
     }
 
@@ -63,6 +65,16 @@ internal sealed class SearchableTimezoneBox : ComboBox
                 return opt;
             if (SelectedIndex >= 0 && SelectedIndex < Items.Count)
                 return Items[SelectedIndex] as TimezoneOption;
+
+            // Fall back to pending / text match so PersistSettings still sees the intended zone
+            if (!string.IsNullOrWhiteSpace(_pendingWindowsId))
+            {
+                var pending = _all.FirstOrDefault(o =>
+                    string.Equals(o.WindowsId, _pendingWindowsId, StringComparison.OrdinalIgnoreCase));
+                if (pending is not null)
+                    return pending;
+            }
+
             return null;
         }
     }
@@ -74,6 +86,7 @@ internal sealed class SearchableTimezoneBox : ComboBox
             favoriteWindowsIds?.Where(id => !string.IsNullOrWhiteSpace(id)) ?? [],
             StringComparer.OrdinalIgnoreCase);
         ApplyFilter("", keepText: false);
+        TryApplyPendingSelection();
     }
 
     public void SetFavorites(IEnumerable<string> favoriteWindowsIds)
@@ -81,7 +94,7 @@ internal sealed class SearchableTimezoneBox : ComboBox
         _favorites = new HashSet<string>(
             favoriteWindowsIds.Where(id => !string.IsNullOrWhiteSpace(id)),
             StringComparer.OrdinalIgnoreCase);
-        var currentId = SelectedOption?.WindowsId;
+        var currentId = SelectedOption?.WindowsId ?? _pendingWindowsId;
         ApplyFilter(_filter, keepText: true);
         if (currentId is not null)
             SelectWindowsId(currentId);
@@ -89,7 +102,11 @@ internal sealed class SearchableTimezoneBox : ComboBox
 
     public bool SelectWindowsId(string windowsId)
     {
-        // Ensure item is in list (clear filter if needed)
+        if (string.IsNullOrWhiteSpace(windowsId))
+            return false;
+
+        _pendingWindowsId = windowsId;
+
         if (!Items.Cast<object>().OfType<TimezoneOption>()
                 .Any(o => string.Equals(o.WindowsId, windowsId, StringComparison.OrdinalIgnoreCase)))
         {
@@ -109,6 +126,7 @@ internal sealed class SearchableTimezoneBox : ComboBox
             }
         }
 
+        // Not in filtered list yet — keep pending; ApplyFilter/HandleCreated will retry
         return false;
     }
 
@@ -119,15 +137,10 @@ internal sealed class SearchableTimezoneBox : ComboBox
             if (Items[i] is TimezoneOption opt &&
                 string.Equals(opt.Abbreviation, abbreviation, StringComparison.OrdinalIgnoreCase))
             {
-                SelectedIndex = i;
-                _filtering = true;
-                try { Text = FormatOption(opt); }
-                finally { _filtering = false; }
-                return true;
+                return SelectWindowsId(opt.WindowsId);
             }
         }
 
-        // search full catalog
         var match = _all.FirstOrDefault(o =>
             string.Equals(o.Abbreviation, abbreviation, StringComparison.OrdinalIgnoreCase));
         if (match is not null)
@@ -142,13 +155,19 @@ internal sealed class SearchableTimezoneBox : ComboBox
         return false;
     }
 
+    private void TryApplyPendingSelection()
+    {
+        if (string.IsNullOrWhiteSpace(_pendingWindowsId) || _filtering)
+            return;
+        SelectWindowsId(_pendingWindowsId);
+    }
+
     private void OnTextUpdate(object? sender, EventArgs e)
     {
         if (_filtering)
             return;
         ApplyFilter(Text, keepText: true);
         DroppedDown = true;
-        // keep cursor at end
         SelectionStart = Text.Length;
         SelectionLength = 0;
     }
@@ -174,7 +193,7 @@ internal sealed class SearchableTimezoneBox : ComboBox
             .ToList();
 
         var previous = keepText ? Text : null;
-        var selectedId = SelectedOption?.WindowsId;
+        var selectedId = SelectedOption?.WindowsId ?? _pendingWindowsId;
 
         _filtering = true;
         BeginUpdate();
@@ -192,13 +211,16 @@ internal sealed class SearchableTimezoneBox : ComboBox
                         string.Equals(opt.WindowsId, selectedId, StringComparison.OrdinalIgnoreCase))
                     {
                         SelectedIndex = i;
+                        Text = FormatOption(opt);
+                        _pendingWindowsId = selectedId;
                         break;
                     }
                 }
             }
-
-            if (keepText && previous is not null)
+            else if (keepText && previous is not null)
+            {
                 Text = previous;
+            }
         }
         finally
         {
@@ -209,8 +231,11 @@ internal sealed class SearchableTimezoneBox : ComboBox
 
     private void CommitSelectionFromText()
     {
-        if (SelectedItem is TimezoneOption)
+        if (SelectedItem is TimezoneOption selected)
+        {
+            _pendingWindowsId = selected.WindowsId;
             return;
+        }
 
         var q = Text.Trim();
         if (q.Length == 0)

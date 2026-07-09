@@ -2,6 +2,11 @@
 
 All notable changes to ZoneShift are documented here.
 
+## 1.6.3
+
+### Fix
+- Preferences (zones, format, theme) **survive upgrades** — save before silent install, never overwrite disk zones with incomplete UI state, stronger combo restore
+
 ## 1.6.2
 
 ### Fix

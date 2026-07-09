@@ -5,7 +5,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
 
-$version = "1.6.2" # fallback if csproj parse fails
+$version = "1.6.3" # fallback if csproj parse fails
 $csproj = Join-Path $root "TimezoneConverter.csproj"
 # Prefer version from csproj if present
 $csprojText = Get-Content $csproj -Raw

@@ -85,7 +85,10 @@ public sealed class AppSettings
             if (settings.OverlayOpacity is < 0.4 or > 1.0)
                 settings.OverlayOpacity = 0.94;
 
-            AppLog.Info($"Loaded settings from {path} ({settings.TargetWindowsIds?.Length ?? 0} zones).");
+            var zoneList = string.Join(", ",
+                (settings.TargetWindowsIds ?? Array.Empty<string?>()).Where(id => !string.IsNullOrWhiteSpace(id))!);
+            AppLog.Info(
+                $"Loaded settings from {path} ({settings.TargetWindowsIds?.Length ?? 0} zones: {zoneList}).");
             return settings;
         }
         catch (Exception ex)
@@ -132,7 +135,20 @@ public sealed class AppSettings
 
             File.Copy(temp, path, overwrite: true);
             File.Delete(temp);
-            AppLog.Info($"Saved settings ({TargetWindowsIds?.Length ?? 0} zones) to {path}");
+            var zoneList = string.Join(", ",
+                (TargetWindowsIds ?? Array.Empty<string?>()).Where(id => !string.IsNullOrWhiteSpace(id))!);
+            AppLog.Info($"Saved settings ({TargetWindowsIds?.Length ?? 0} zones: {zoneList}) to {path}");
+
+            // Ensure data is on disk before installers/force-close can kill the process
+            try
+            {
+                using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                fs.Flush(flushToDisk: true);
+            }
+            catch
+            {
+                // best-effort
+            }
         }
         catch (Exception ex)
         {

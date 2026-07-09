@@ -1,10 +1,10 @@
 ; ZoneShift installer - compiled by Inno Setup 6
 ; Pass architecture defines from pack-installer.ps1:
-;   ISCC /DAppArch=x64 /DPublishDir=..\publish\win-x64 /DMyAppVersion=1.6.2 ZoneShift.iss
-;   ISCC /DAppArch=arm64 /DPublishDir=..\publish\win-arm64 /DMyAppVersion=1.6.2 ZoneShift.iss
+;   ISCC /DAppArch=x64 /DPublishDir=..\publish\win-x64 /DMyAppVersion=1.6.3 ZoneShift.iss
+;   ISCC /DAppArch=arm64 /DPublishDir=..\publish\win-arm64 /DMyAppVersion=1.6.3 ZoneShift.iss
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.6.2"
+  #define MyAppVersion "1.6.3"
 #endif
 #ifndef AppArch
   #define AppArch "x64"
@@ -73,5 +73,6 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 ; process can release its single-instance mutex before the new exe starts.
 Filename: "{sys}\cmd.exe"; Parameters: "/C ping 127.0.0.1 -n 3 >nul & start """" ""{app}\{#MyAppExeName}"""; WorkingDir: "{app}"; Flags: nowait postinstall skipifnotsilent runhidden
 
+; Only remove logs on uninstall — NEVER roaming %AppData%\ZoneShift (user preferences).
 [UninstallDelete]
-Type: filesandordirs; Name: "{localappdata}\ZoneShift"
+Type: filesandordirs; Name: "{localappdata}\ZoneShift\logs"
