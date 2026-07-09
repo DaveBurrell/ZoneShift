@@ -4,7 +4,7 @@
 ;   ISCC /DAppArch=arm64 /DPublishDir=..\publish\win-arm64 /DMyAppVersion=1.4.0 ZoneShift.iss
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.4.0"
+  #define MyAppVersion "1.4.1"
 #endif
 #ifndef AppArch
   #define AppArch "x64"

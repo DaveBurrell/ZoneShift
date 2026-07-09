@@ -59,18 +59,18 @@ public sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
-        // Design for 96 DPI; PerMonitorV2 scales via Dpi AutoScaleMode
-        AutoScaleDimensions = new SizeF(96F, 96F);
-        AutoScaleMode = AutoScaleMode.Dpi;
+        // Absolute layout at 96 DPI logical pixels (pairs with DpiUnawareGdiScaled)
+        AutoScaleMode = AutoScaleMode.None;
         Font = UiTheme.BodyFont;
         BackColor = UiTheme.AppBackground;
         DoubleBuffered = true;
         ShowInTaskbar = true;
         ClientSize = new Size(700, 780);
-        MinimumSize = new Size(640, 640);
+        MinimumSize = new Size(680, 720);
 
         ApplyAppIcon();
         BuildUi();
+        ClientSize = new Size(700, 780);
 
         SetupTrayIcon();
         ShowDetectedLocalTimezone();
@@ -86,7 +86,12 @@ public sealed class MainForm : Form
 
         Shown += (_, _) =>
         {
-            RestoreWindowBounds();
+            // Enforce readable size if saved bounds are missing/corrupt
+            if (Width < 640 || Height < 600)
+                ClientSize = new Size(700, 780);
+            else
+                RestoreWindowBounds();
+
             RestoreSavedTargetSelections();
             RebuildTargetListUi();
             RefreshFavoriteVisuals();
@@ -1063,7 +1068,8 @@ public sealed class MainForm : Form
 
     private void RestoreWindowBounds()
     {
-        if (_settings.WindowWidth >= 640 && _settings.WindowHeight >= 600 &&
+        // Ignore tiny bounds saved while PerMonitorV2 crushed the layout (~480x560)
+        if (_settings.WindowWidth >= 680 && _settings.WindowHeight >= 700 &&
             _settings.WindowX >= 0 && _settings.WindowY >= 0 &&
             IsOnScreen(_settings.WindowX, _settings.WindowY))
         {

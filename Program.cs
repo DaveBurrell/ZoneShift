@@ -14,8 +14,10 @@ static class Program
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            // Proper per-monitor DPI; form uses AutoScaleMode.Dpi at 96 design units
-            Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+            // Absolute layout is designed at 96 DPI. GDI-scaled unaware keeps
+            // control positions stable while looking clearer than pure DpiUnaware.
+            // PerMonitorV2 + AutoScaleMode.Dpi crushed the absolute layout.
+            Application.SetHighDpiMode(HighDpiMode.DpiUnawareGdiScaled);
 
             AppLog.Info($"ZoneShift starting (arch={UpdateChecker.CurrentArchitectureLabel}).");
             Application.ApplicationExit += (_, _) =>

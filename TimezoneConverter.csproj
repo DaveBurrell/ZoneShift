@@ -12,10 +12,11 @@
     <Product>ZoneShift</Product>
     <AssemblyTitle>ZoneShift</AssemblyTitle>
     <Description>ZoneShift - convert times across timezones with live digital clocks</Description>
-    <Version>1.4.0</Version>
+    <Version>1.4.1</Version>
     <Company>ZoneShift</Company>
     <Copyright>Copyright (c) ZoneShift</Copyright>
-    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <!-- Keep in sync with Program.cs SetHighDpiMode - PerMonitorV2 breaks absolute layout -->
+    <ApplicationHighDpiMode>DpiUnawareGdiScaled</ApplicationHighDpiMode>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(PublishSingleFile)' == 'true'">
