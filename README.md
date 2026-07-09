@@ -1,18 +1,21 @@
 ﻿# ZoneShift
 
-A polished Windows desktop app that converts a time in **your PC timezone** into up to **5 other timezones** - or the other way around - with digital clock readouts and persistent preferences.
+A polished Windows desktop app that converts a time in **your PC timezone** into up to **8 other timezones** - or the other way around - with digital clock readouts and persistent preferences.
 
 ## Features
 
 - **Auto-detects** your Windows local timezone
-- Enter a **date** and **time**
-- **Add or remove** target timezones (1-8) - keep only what you need
+- **Live now** or enter a custom **date** and **time**
+- **Add or remove** target timezones (1-8) - search, favorites, keep only what you need
 - Convert **From my zone** or **To my zone**
 - **Digital clock** display with **12-hour / 24-hour** toggle
-- **Desktop overlay** - sticky always-on-top mini view of your time + conversions
-- **Remembers** zones, format, and overlay position between launches
-- **Lives in the system tray** - close or minimize keeps it running; right-click tray icon -> **Exit** to quit
-- Daylight Saving Time handled by Windows
+- **Desktop overlay** - sticky always-on-top mini view (lock, compact, opacity)
+- **Copy** multi-line or one-line (chat) conversion results
+- **DST warnings** when a local time is invalid (spring-forward) or ambiguous (fall-back)
+- First-run **Tips** dialog; optional **close minimizes to tray**
+- **Remembers** zones, format, overlay, and window position between launches
+- **System tray** - close/minimize can keep it running; right-click tray icon -> **Exit** to quit
+- **Auto-update** check from GitHub Releases (x64 / arm64 installers)
 - Shows when a converted time falls on the previous/next day
 
 ## Requirements
@@ -46,16 +49,18 @@ cd C:\Users\davej\source\TimezoneConverter
 powershell -ExecutionPolicy Bypass -File .\pack-installer.ps1
 ```
 
-Output:
+Output (dual architecture):
 
-`C:\Users\davej\source\TimezoneConverter\dist\ZoneShift-Setup-1.2.0.exe`
+- `dist\ZoneShift-Setup-1.5.0-x64.exe`
+- `dist\ZoneShift-Setup-1.5.0-arm64.exe`
 
 The installer:
-- Installs under `Program Files` or per-user (standard wizard)
-- Optional **desktop shortcut**
-- Optional **start with Windows**
-- Adds **Start Menu** entry and uninstaller
-- Bundles the full app (~64 MB setup)
+- Per-user install under `%LocalAppData%\Programs\ZoneShift` (no admin required)
+- Optional **desktop shortcut** and **start with Windows**
+- **Start Menu** entry and uninstaller
+- Self-contained (~60+ MB setup; no .NET install needed on the target PC)
+
+Tag releases (`v1.5.0`) also build installers via GitHub Actions (`.github/workflows/release.yml`).
 
 Requires [Inno Setup 6](https://jrsoftware.org/isinfo.php) to rebuild (`winget install JRSoftware.InnoSetup`).
 

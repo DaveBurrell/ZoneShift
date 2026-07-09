@@ -31,6 +31,7 @@ public sealed class AppSettings
 
     public bool CloseToTray { get; set; } = true;
     public bool LiveMode { get; set; } = true;
+    public bool HasSeenOnboarding { get; set; }
 
     public int WindowX { get; set; } = -1;
     public int WindowY { get; set; } = -1;

@@ -16,7 +16,8 @@ public class AppSettingsTests
             Use24Hour = true,
             ConvertToLocal = true,
             LiveMode = false,
-            CloseToTray = true,
+            CloseToTray = false,
+            HasSeenOnboarding = true,
             ReverseSourceWindowsId = "India Standard Time",
             TargetWindowsIds = ["India Standard Time", "Tokyo Standard Time", "GMT Standard Time"],
             OverlayVisible = false,
@@ -29,6 +30,8 @@ public class AppSettingsTests
         Assert.True(loaded.Use24Hour);
         Assert.True(loaded.ConvertToLocal);
         Assert.False(loaded.LiveMode);
+        Assert.False(loaded.CloseToTray);
+        Assert.True(loaded.HasSeenOnboarding);
         Assert.Equal("India Standard Time", loaded.ReverseSourceWindowsId);
         Assert.NotNull(loaded.TargetWindowsIds);
         Assert.Equal(3, loaded.TargetWindowsIds!.Length);

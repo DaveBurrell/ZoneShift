@@ -64,7 +64,7 @@ public static class UpdateChecker
                 return new UpdateCheckResult(false, currentVersion, null, htmlUrl, null, null,
                     "Could not read latest version.");
 
-            var (setupUrl, setupName) = PickSetupAsset(root, CurrentArchitectureLabel);
+            var (setupUrl, setupName) = PickSetupAssetFromRelease(root, CurrentArchitectureLabel);
             var newer = CompareVersions(latest, currentVersion) > 0;
 
             return new UpdateCheckResult(
@@ -127,20 +127,33 @@ public static class UpdateChecker
         System.Diagnostics.Process.Start(psi);
     }
 
-    private static (string? Url, string? Name) PickSetupAsset(JsonElement root, string arch)
+    private static (string? Url, string? Name) PickSetupAssetFromRelease(JsonElement root, string arch)
     {
         if (!root.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array)
             return (null, null);
 
-        string? fallbackUrl = null;
-        string? fallbackName = null;
-
+        var list = new List<(string Name, string Url)>();
         foreach (var asset in assets.EnumerateArray())
         {
             var name = asset.TryGetProperty("name", out var n) ? n.GetString() : null;
             var url = asset.TryGetProperty("browser_download_url", out var u) ? u.GetString() : null;
-            if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(url))
-                continue;
+            if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(url))
+                list.Add((name, url));
+        }
+
+        return PickSetupAsset(list, arch);
+    }
+
+    /// <summary>Public for unit tests — pick setup asset name/url for an architecture.</summary>
+    public static (string? Url, string? Name) PickSetupAsset(
+        IReadOnlyList<(string Name, string Url)> assets,
+        string arch)
+    {
+        string? fallbackUrl = null;
+        string? fallbackName = null;
+
+        foreach (var (name, url) in assets)
+        {
             if (!name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
                 continue;
             if (!name.Contains("Setup", StringComparison.OrdinalIgnoreCase) &&
@@ -150,17 +163,22 @@ public static class UpdateChecker
             fallbackUrl ??= url;
             fallbackName ??= name;
 
-            if (name.Contains(arch, StringComparison.OrdinalIgnoreCase) ||
-                (arch == "x64" && (name.Contains("x64", StringComparison.OrdinalIgnoreCase) ||
-                                   name.Contains("win-x64", StringComparison.OrdinalIgnoreCase))) ||
-                (arch == "arm64" && (name.Contains("arm64", StringComparison.OrdinalIgnoreCase) ||
-                                     name.Contains("win-arm64", StringComparison.OrdinalIgnoreCase))))
-            {
+            var isX64 = arch.Equals("x64", StringComparison.OrdinalIgnoreCase);
+            var isArm = arch.Equals("arm64", StringComparison.OrdinalIgnoreCase);
+
+            if (isArm && (name.Contains("arm64", StringComparison.OrdinalIgnoreCase) ||
+                          name.Contains("win-arm64", StringComparison.OrdinalIgnoreCase)))
                 return (url, name);
-            }
+
+            if (isX64 && (name.Contains("x64", StringComparison.OrdinalIgnoreCase) ||
+                          name.Contains("win-x64", StringComparison.OrdinalIgnoreCase)) &&
+                !name.Contains("arm", StringComparison.OrdinalIgnoreCase))
+                return (url, name);
+
+            if (name.Contains(arch, StringComparison.OrdinalIgnoreCase))
+                return (url, name);
         }
 
-        // Legacy single installer without arch suffix
         return (fallbackUrl, fallbackName);
     }
 

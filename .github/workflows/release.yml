@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Test
+        run: |
+          dotnet restore ZoneShift.sln
+          dotnet build ZoneShift.sln -c Release --no-restore
+          dotnet test ZoneShift.sln -c Release --no-build --verbosity normal
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Locate ISCC
+        id: iscc
+        shell: pwsh
+        run: |
+          $paths = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+          )
+          $found = $paths | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $found) { throw "ISCC.exe not found after choco install" }
+          echo "path=$found" >> $env:GITHUB_OUTPUT
+
+      - name: Publish and pack installers
+        shell: pwsh
+        run: |
+          $version = if ("${{ github.ref_name }}" -match '^v(.+)$') { $Matches[1] } else { "0.0.0" }
+          $iscc = "${{ steps.iscc.outputs.path }}"
+          $root = $PWD
+
+          function Publish($rid) {
+            $out = Join-Path $root "publish\$rid"
+            New-Item -ItemType Directory -Force -Path $out | Out-Null
+            dotnet publish TimezoneConverter.csproj -c Release -r $rid --self-contained true `
+              -p:PublishSingleFile=true `
+              -p:IncludeNativeLibrariesForSelfExtract=true `
+              -p:EnableCompressionInSingleFile=true `
+              -p:DebugType=none `
+              -o $out
+            if ($LASTEXITCODE -ne 0) { throw "publish $rid failed" }
+          }
+
+          Publish "win-x64"
+          Publish "win-arm64"
+
+          New-Item -ItemType Directory -Force -Path (Join-Path $root "dist") | Out-Null
+
+          & $iscc "/DMyAppVersion=$version" "/DAppArch=x64" "/DPublishDir=..\publish\win-x64" "installer\ZoneShift.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC x64 failed" }
+          & $iscc "/DMyAppVersion=$version" "/DAppArch=arm64" "/DPublishDir=..\publish\win-arm64" "installer\ZoneShift.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC arm64 failed" }
+
+          Get-ChildItem dist -Filter "ZoneShift-Setup-*.exe" | ForEach-Object { $_.FullName }
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/ZoneShift-Setup-*-x64.exe
+            dist/ZoneShift-Setup-*-arm64.exe
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -25,6 +25,7 @@ public sealed class MainForm : Form
     private readonly SegmentedToggle _formatToggle = new("12-hour", "24-hour");
     private readonly SegmentedToggle _directionToggle = new("From my zone", "To my zone");
     private readonly CheckBox _overlayCheck = new();
+    private readonly CheckBox _closeToTrayCheck = new();
     private readonly DigitalClockPanel _primaryClock = new(large: true);
     private readonly Label _statusLabel = new();
     private readonly Button _addTimezoneButton = new();
@@ -32,6 +33,8 @@ public sealed class MainForm : Form
     private FlowLayoutPanel _targetListHost = null!;
     private Label _targetCountLabel = null!;
     private string _lastCopyText = "";
+    private string _lastCopyOneLine = "";
+    private ConversionSnapshot? _lastSnapshot;
 
     private List<TimezoneOption> _timezoneOptions = [];
     private OverlayForm? _overlay;
@@ -97,6 +100,9 @@ public sealed class MainForm : Form
             RefreshFavoriteVisuals();
             RefreshDisplays();
             PersistSettings();
+
+            if (!_settings.HasSeenOnboarding)
+                BeginInvoke(() => ShowOnboarding(force: false));
         };
 
         FormClosing += OnFormClosing;
@@ -313,7 +319,7 @@ public sealed class MainForm : Form
         var optionsWrap = new Panel
         {
             Dock = DockStyle.Top,
-            Height = 118,
+            Height = 142,
             BackColor = UiTheme.AppBackground,
             Padding = new Padding(16, 10, 16, 0)
         };
@@ -339,13 +345,26 @@ public sealed class MainForm : Form
         _formatToggle.Size = new Size(200, 32);
         _formatToggle.SelectionChanged += OnFormatChanged;
 
-        _overlayCheck.Text = "Desktop overlay (always-on-top mini view)";
+        _overlayCheck.Text = "Desktop overlay";
         _overlayCheck.Font = new Font("Segoe UI Semibold", 9f);
         _overlayCheck.ForeColor = UiTheme.TextPrimary;
         _overlayCheck.BackColor = UiTheme.CardBackground;
         _overlayCheck.AutoSize = true;
         _overlayCheck.Location = new Point(12, 68);
         _overlayCheck.CheckedChanged += OnOverlayCheckChanged;
+
+        _closeToTrayCheck.Text = "Close minimizes to tray";
+        _closeToTrayCheck.Font = new Font("Segoe UI Semibold", 9f);
+        _closeToTrayCheck.ForeColor = UiTheme.TextPrimary;
+        _closeToTrayCheck.BackColor = UiTheme.CardBackground;
+        _closeToTrayCheck.AutoSize = true;
+        _closeToTrayCheck.Location = new Point(150, 68);
+        _closeToTrayCheck.CheckedChanged += (_, _) =>
+        {
+            if (_suppressEvents) return;
+            _settings.CloseToTray = _closeToTrayCheck.Checked;
+            PersistSettings();
+        };
 
         var aboutLink = new LinkLabel
         {
@@ -369,25 +388,50 @@ public sealed class MainForm : Form
         _updateButton.Location = new Point(420, 66);
         _updateButton.Click += async (_, _) => await CheckForUpdatesAsync();
 
-        _copyButton.Text = "Copy results";
+        _copyButton.Text = "Copy";
         _copyButton.FlatStyle = FlatStyle.Flat;
         _copyButton.Font = UiTheme.CaptionFont;
         _copyButton.ForeColor = UiTheme.Accent;
         _copyButton.BackColor = UiTheme.AccentSoft;
         _copyButton.FlatAppearance.BorderSize = 0;
         _copyButton.Cursor = Cursors.Hand;
-        _copyButton.Size = new Size(90, 24);
+        _copyButton.Size = new Size(70, 24);
         _copyButton.Location = new Point(530, 66);
-        _copyButton.Click += (_, _) => CopyResults();
+        var copyMenu = new ContextMenuStrip();
+        copyMenu.Items.Add("Copy multi-line", null, (_, _) => CopyResults(oneLine: false));
+        copyMenu.Items.Add("Copy one line (chat)", null, (_, _) => CopyResults(oneLine: true));
+        _copyButton.Click += (_, _) =>
+        {
+            // Left-click: multi-line; right-click menu also available
+            CopyResults(oneLine: false);
+        };
+        _copyButton.MouseUp += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Right)
+                copyMenu.Show(_copyButton, e.Location);
+        };
+        _copyButton.ContextMenuStrip = copyMenu;
+
+        var tipsLink = new LinkLabel
+        {
+            Text = "Tips",
+            Location = new Point(12, 96),
+            AutoSize = true,
+            LinkColor = UiTheme.Accent,
+            BackColor = UiTheme.CardBackground
+        };
+        tipsLink.LinkClicked += (_, _) => ShowOnboarding(force: true);
 
         optionsCard.Controls.Add(dirCap);
         optionsCard.Controls.Add(_directionToggle);
         optionsCard.Controls.Add(fmtCap);
         optionsCard.Controls.Add(_formatToggle);
         optionsCard.Controls.Add(_overlayCheck);
+        optionsCard.Controls.Add(_closeToTrayCheck);
         optionsCard.Controls.Add(aboutLink);
         optionsCard.Controls.Add(_updateButton);
         optionsCard.Controls.Add(_copyButton);
+        optionsCard.Controls.Add(tipsLink);
         optionsWrap.Controls.Add(optionsCard);
         Controls.Add(optionsWrap);
 
@@ -953,14 +997,13 @@ public sealed class MainForm : Form
         _reverseSourceTimezone.SetFavorites(favs);
     }
 
-    private void CopyResults()
+    private void CopyResults(bool oneLine)
     {
-        if (string.IsNullOrWhiteSpace(_lastCopyText))
-        {
+        if (string.IsNullOrWhiteSpace(_lastCopyText) && string.IsNullOrWhiteSpace(_lastCopyOneLine))
             RefreshDisplays();
-        }
 
-        if (string.IsNullOrWhiteSpace(_lastCopyText))
+        var text = oneLine ? _lastCopyOneLine : _lastCopyText;
+        if (string.IsNullOrWhiteSpace(text))
         {
             MessageBox.Show(this, "Nothing to copy yet.", "ZoneShift", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
@@ -968,16 +1011,27 @@ public sealed class MainForm : Form
 
         try
         {
-            Clipboard.SetText(_lastCopyText);
-            _statusLabel.Text = "Results copied to clipboard.";
+            Clipboard.SetText(text);
+            _statusLabel.Text = oneLine ? "One-line results copied." : "Multi-line results copied.";
             _statusLabel.ForeColor = UiTheme.Success;
-            AppLog.Info("Copied conversion results to clipboard.");
+            AppLog.Info($"Copied conversion results ({(oneLine ? "one-line" : "multi-line")}).");
         }
         catch (Exception ex)
         {
             AppLog.Error("Clipboard copy failed", ex);
             MessageBox.Show(this, "Could not access the clipboard.", "ZoneShift", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
+    }
+
+    private void ShowOnboarding(bool force)
+    {
+        if (!force && _settings.HasSeenOnboarding)
+            return;
+
+        using var dlg = new OnboardingForm();
+        dlg.ShowDialog(this);
+        _settings.HasSeenOnboarding = true;
+        PersistSettings();
     }
 
     private async Task CheckForUpdatesAsync()
@@ -1100,6 +1154,7 @@ public sealed class MainForm : Form
             _formatToggle.RightSelected = _settings.Use24Hour;
             _directionToggle.RightSelected = _settings.ConvertToLocal;
             _overlayCheck.Checked = _settings.OverlayVisible;
+            _closeToTrayCheck.Checked = _settings.CloseToTray;
 
             _liveMode = _settings.LiveMode;
             _liveModeCheck.Checked = _liveMode;
@@ -1228,6 +1283,7 @@ public sealed class MainForm : Form
             _settings.Use24Hour = Use24Hour;
             _settings.ConvertToLocal = ConvertToLocal;
             _settings.LiveMode = _liveMode;
+            _settings.CloseToTray = _closeToTrayCheck.Checked;
             _settings.OverlayVisible = _overlayCheck.Checked || (_overlay is { Visible: true });
 
             if (_reverseSourceTimezone.SelectedOption is TimezoneOption reverseOpt)
@@ -1502,25 +1558,27 @@ public sealed class MainForm : Form
                 _overlay.UpdateDisplay(FormatDigitalTime(primaryTime), overlayCaption, overlayZones);
             }
 
-            // Build clipboard text
-            var lines = new List<string>
-            {
-                $"ZoneShift conversion ({primaryTime:yyyy-MM-dd})",
-                $"Local: {FormatDigitalTime(primaryTime)} ({TimeConversionService.FormatOffset(localOffset)})"
-            };
-            foreach (var z in overlayZones)
-                lines.Add($"{z.label}: {z.time} ({z.meta})");
-            _lastCopyText = string.Join(Environment.NewLine, lines);
+            _lastSnapshot = snapshot;
+            _lastCopyText = TimeConversionService.FormatCopyMultiline(snapshot, Use24Hour, _liveMode);
+            _lastCopyOneLine = TimeConversionService.FormatCopyOneLine(snapshot, Use24Hour, _liveMode);
 
             var mode = Use24Hour ? "24-hour" : "12-hour";
-            _statusLabel.Text = ConvertToLocal
-                ? (_liveMode
-                    ? $"To my zone - live - {GetInputTimezoneLabel()} -> local - {_targetRows.Count} zone(s) - {mode}"
-                    : $"To my zone - entered in {GetInputTimezoneLabel()} - {_targetRows.Count} zone(s) - {mode}")
-                : (_liveMode
-                    ? $"From my zone - live - {_localTimezone.Id} - {_targetRows.Count} zone(s) - {mode}"
-                    : $"From my zone - custom - {_localTimezone.Id} - {_targetRows.Count} zone(s) - {mode}");
-            _statusLabel.ForeColor = UiTheme.TextMuted;
+            if (!string.IsNullOrWhiteSpace(snapshot.Warning))
+            {
+                _statusLabel.Text = snapshot.Warning;
+                _statusLabel.ForeColor = Color.FromArgb(180, 83, 9); // amber warning
+            }
+            else
+            {
+                _statusLabel.Text = ConvertToLocal
+                    ? (_liveMode
+                        ? $"To my zone - live - {GetInputTimezoneLabel()} -> local - {_targetRows.Count} zone(s) - {mode}"
+                        : $"To my zone - entered in {GetInputTimezoneLabel()} - {_targetRows.Count} zone(s) - {mode}")
+                    : (_liveMode
+                        ? $"From my zone - live - {_localTimezone.Id} - {_targetRows.Count} zone(s) - {mode}"
+                        : $"From my zone - custom - {_localTimezone.Id} - {_targetRows.Count} zone(s) - {mode}");
+                _statusLabel.ForeColor = UiTheme.TextMuted;
+            }
         }
         catch (Exception ex)
         {
