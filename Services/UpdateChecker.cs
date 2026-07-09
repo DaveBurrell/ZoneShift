@@ -113,18 +113,25 @@ public static class UpdateChecker
             await remote.CopyToAsync(local, ct).ConfigureAwait(false);
         }
 
-        status?.Report("Starting installer...");
+        status?.Report("Installing update (ZoneShift will reopen)...");
         AppLog.Info($"Launching silent installer: {tempPath}");
 
+        // VERYSILENT: no UI. CLOSEAPPLICATIONS: unlock ZoneShift.exe if still running.
+        // Installer [Run] (skipifnotsilent) relaunches the app after install.
         var psi = new System.Diagnostics.ProcessStartInfo
         {
             FileName = tempPath,
-            // Close ZoneShift, install silently, do not restart PC
-            Arguments = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /FORCECLOSEAPPLICATIONS",
+            Arguments =
+                "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART " +
+                "/CLOSEAPPLICATIONS /FORCECLOSEAPPLICATIONS /RESTARTAPPLICATIONS",
             UseShellExecute = true
         };
 
-        System.Diagnostics.Process.Start(psi);
+        var proc = System.Diagnostics.Process.Start(psi);
+        if (proc is null)
+            throw new InvalidOperationException("Could not start the installer process.");
+
+        AppLog.Info($"Installer process started (pid={proc.Id}). App will exit so install can finish.");
     }
 
     private static (string? Url, string? Name) PickSetupAssetFromRelease(JsonElement root, string arch)

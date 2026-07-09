@@ -1,10 +1,10 @@
 ; ZoneShift installer - compiled by Inno Setup 6
 ; Pass architecture defines from pack-installer.ps1:
-;   ISCC /DAppArch=x64 /DPublishDir=..\publish\win-x64 /DMyAppVersion=1.6.1 ZoneShift.iss
-;   ISCC /DAppArch=arm64 /DPublishDir=..\publish\win-arm64 /DMyAppVersion=1.6.1 ZoneShift.iss
+;   ISCC /DAppArch=x64 /DPublishDir=..\publish\win-x64 /DMyAppVersion=1.6.2 ZoneShift.iss
+;   ISCC /DAppArch=arm64 /DPublishDir=..\publish\win-arm64 /DMyAppVersion=1.6.2 ZoneShift.iss
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.6.1"
+  #define MyAppVersion "1.6.2"
 #endif
 #ifndef AppArch
   #define AppArch "x64"
@@ -44,7 +44,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 #endif
 MinVersion=10.0
 CloseApplications=yes
-RestartApplications=no
+; Restart apps closed by CloseApplications (helps when the running ZoneShift is force-closed)
+RestartApplications=yes
 ChangesAssociations=no
 AllowNoIcons=no
 
@@ -66,7 +67,11 @@ Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDi
 Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: startupicon
 
 [Run]
+; Interactive wizard: optional "Launch ZoneShift" checkbox
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+; Silent auto-update (/VERYSILENT): always relaunch after a short delay so the old
+; process can release its single-instance mutex before the new exe starts.
+Filename: "{sys}\cmd.exe"; Parameters: "/C ping 127.0.0.1 -n 3 >nul & start """" ""{app}\{#MyAppExeName}"""; WorkingDir: "{app}"; Flags: nowait postinstall skipifnotsilent runhidden
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{localappdata}\ZoneShift"

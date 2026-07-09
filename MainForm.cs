@@ -1383,7 +1383,8 @@ public sealed class MainForm : Form
 
             var answer = MessageBox.Show(
                 this,
-                $"{result.Message}\n\nDownload and install {result.SetupFileName} now?\nZoneShift will close and the installer will run silently.",
+                $"{result.Message}\n\nDownload and install {result.SetupFileName} now?\n" +
+                "ZoneShift will close, update silently, then reopen.",
                 "ZoneShift update",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Question);
@@ -1413,9 +1414,10 @@ public sealed class MainForm : Form
             });
 
             await UpdateChecker.InstallUpdateAsync(result.SetupDownloadUrl!, result.SetupFileName, progress);
-            // Installer was launched with CLOSEAPPLICATIONS — exit cleanly
+            // Exit so the installer can replace files; silent [Run] relaunches ZoneShift.
             _exitRequested = true;
             PersistSettings();
+            try { SingleInstance.Release(); } catch { /* ignore */ }
             Application.Exit();
         }
         catch (Exception ex)
@@ -1424,9 +1426,6 @@ public sealed class MainForm : Form
             _statusLabel.Text = "Update failed - see logs.";
             _statusLabel.ForeColor = UiTheme.Danger;
             MessageBox.Show(this, $"Update failed:\n{ex.Message}", "ZoneShift", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        }
-        finally
-        {
             SetUpdateUiBusy(false);
         }
     }

@@ -2,6 +2,11 @@
 
 All notable changes to ZoneShift are documented here.
 
+## 1.6.2
+
+### Fix
+- Silent auto-update now **relaunches ZoneShift** after install (was skipped under `/VERYSILENT`)
+
 ## 1.6.1
 
 ### UI polish
