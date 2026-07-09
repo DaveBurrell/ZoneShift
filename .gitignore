@@ -1,0 +1,23 @@
+## Build
+bin/
+obj/
+publish/
+dist/
+*.user
+*.suo
+.vs/
+
+## OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+## Local / tools output
+layout-review.png
+tools/Screenshot/bin/
+tools/Screenshot/obj/
+tools/IconMaker/bin/
+tools/IconMaker/obj/
+
+## Logs
+*.log

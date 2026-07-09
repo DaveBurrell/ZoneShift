@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <AssemblyName>ZoneShift</AssemblyName>
+    <RootNamespace>TimezoneConverter</RootNamespace>
+    <Product>ZoneShift</Product>
+    <AssemblyTitle>ZoneShift</AssemblyTitle>
+    <Description>ZoneShift — convert times across timezones with live digital clocks</Description>
+    <Version>1.0.0</Version>
+    <Company>ZoneShift</Company>
+    <Copyright>Copyright © ZoneShift</Copyright>
+  </PropertyGroup>
+
+  <!-- Single-file publish defaults (used by pack-installer.ps1) -->
+  <PropertyGroup Condition="'$(PublishSingleFile)' == 'true'">
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Update="Assets\app.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <!-- Helper utilities under tools/ are not part of the app build -->
+    <Compile Remove="tools\**\*" />
+    <None Include="tools\**\*" />
+  </ItemGroup>
+
+</Project>
