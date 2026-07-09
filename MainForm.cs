@@ -10,6 +10,7 @@ public sealed class MainForm : Form
 
     private readonly Label _localTimezoneLabel = new();
     private readonly Label _sourceSectionTitle = new();
+    private readonly Label _localZoneCaption = new();
     private readonly Label _inputZoneCaption = new();
     private readonly Label _dateFieldCaption = new();
     private readonly Label _timeFieldCaption = new();
@@ -21,7 +22,6 @@ public sealed class MainForm : Form
     private readonly CheckBox _liveModeCheck = new();
     private readonly Button _useNowButton = new();
     private readonly Button _copyButton = new();
-    private readonly Button _updateButton = new();
     private readonly SegmentedToggle _formatToggle = new("12-hour", "24-hour");
     private readonly SegmentedToggle _directionToggle = new("From my zone", "To my zone");
     private readonly CheckBox _overlayCheck = new();
@@ -39,6 +39,24 @@ public sealed class MainForm : Form
     private List<TimezoneOption> _timezoneOptions = [];
     private OverlayForm? _overlay;
     private ToolStripMenuItem _trayOverlayItem = null!;
+    private ToolStripMenuItem _menuCheckUpdates = null!;
+    private LinkLabel _footerUpdatesLink = null!;
+    private LinkLabel _footerTipsLink = null!;
+    private LinkLabel _footerAboutLink = null!;
+    private LiveBadgeControl _liveBadge = null!;
+    private MenuStrip _mainMenu = null!;
+    private Label _brandTitle = null!;
+    private Label _brandSubtitle = null!;
+    private Label _wallSectionLabel = null!;
+    private Panel _footerBar = null!;
+    private Panel _footerLinks = null!;
+    private Panel _toolbarHost = null!;
+    private Panel _clockHost = null!;
+    private Panel _leftHost = null!;
+    private Panel _wallHeader = null!;
+    private Panel _wallFooter = null!;
+    private readonly List<ToolStripMenuItem> _themeMenuItems = [];
+    private bool _updateBusy;
 
     private NotifyIcon _trayIcon = null!;
     private ContextMenuStrip _trayMenu = null!;
@@ -58,6 +76,9 @@ public sealed class MainForm : Form
 
     public MainForm()
     {
+        // Apply saved theme before any control paints
+        UiTheme.SetTheme(_settings.Theme, raiseEvent: false);
+
         Text = "ZoneShift";
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedSingle;
@@ -68,12 +89,13 @@ public sealed class MainForm : Form
         BackColor = UiTheme.AppBackground;
         DoubleBuffered = true;
         ShowInTaskbar = true;
-        ClientSize = new Size(700, 780);
-        MinimumSize = new Size(680, 720);
+        ClientSize = new Size(LayoutMetrics.ClientWidth, LayoutMetrics.ClientHeight);
+        MinimumSize = new Size(LayoutMetrics.MinWidth, LayoutMetrics.MinHeight);
 
         ApplyAppIcon();
         BuildUi();
-        ClientSize = new Size(700, 780);
+        ClientSize = new Size(LayoutMetrics.ClientWidth, LayoutMetrics.ClientHeight);
+        SyncThemeMenuChecks();
 
         SetupTrayIcon();
         ShowDetectedLocalTimezone();
@@ -90,8 +112,8 @@ public sealed class MainForm : Form
         Shown += (_, _) =>
         {
             // Enforce readable size if saved bounds are missing/corrupt
-            if (Width < 640 || Height < 600)
-                ClientSize = new Size(700, 780);
+            if (Width < LayoutMetrics.MinWidth - 40 || Height < LayoutMetrics.MinHeight - 40)
+                ClientSize = new Size(LayoutMetrics.ClientWidth, LayoutMetrics.ClientHeight);
             else
                 RestoreWindowBounds();
 
@@ -273,92 +295,178 @@ public sealed class MainForm : Form
         SuspendLayout();
         BackColor = UiTheme.AppBackground;
 
-        // Status bar (bottom)
-        _statusLabel.Height = 24;
-        _statusLabel.Dock = DockStyle.Bottom;
-        _statusLabel.ForeColor = UiTheme.TextMuted;
-        _statusLabel.Font = UiTheme.CaptionFont;
-        _statusLabel.BackColor = UiTheme.AppBackground;
-        _statusLabel.TextAlign = ContentAlignment.MiddleLeft;
-        _statusLabel.Padding = new Padding(16, 0, 16, 0);
-        _statusLabel.AutoEllipsis = true;
-        Controls.Add(_statusLabel);
+        // --- Footer: status + support links ---
+        _footerBar = new Panel
+        {
+            Dock = DockStyle.Bottom,
+            Height = LayoutMetrics.FooterH,
+            BackColor = UiTheme.FooterBack,
+            Padding = new Padding(LayoutMetrics.OuterX, 0, LayoutMetrics.OuterX, 0)
+        };
 
-        // Header (top)
-        var header = new Panel
+        _statusLabel.Dock = DockStyle.Fill;
+        _statusLabel.ForeColor = UiTheme.TextSecondary;
+        _statusLabel.Font = UiTheme.CaptionFont;
+        _statusLabel.BackColor = UiTheme.FooterBack;
+        _statusLabel.TextAlign = ContentAlignment.MiddleLeft;
+        _statusLabel.AutoEllipsis = true;
+        _statusLabel.Padding = new Padding(0, 0, 8, 0);
+
+        _footerLinks = new Panel
+        {
+            Dock = DockStyle.Right,
+            Width = 240,
+            BackColor = UiTheme.FooterBack
+        };
+
+        var linkY = (LayoutMetrics.FooterH - 16) / 2;
+        _footerTipsLink = MakeFooterLink("Tips", 8, linkY);
+        _footerTipsLink.LinkClicked += (_, _) => ShowOnboarding(force: true);
+        _footerAboutLink = MakeFooterLink("About", 56, linkY);
+        _footerAboutLink.LinkClicked += (_, _) => ShowAbout();
+        _footerUpdatesLink = MakeFooterLink("Check updates", 120, linkY);
+        _footerUpdatesLink.LinkClicked += async (_, _) => await CheckForUpdatesAsync();
+        _footerLinks.Controls.Add(_footerTipsLink);
+        _footerLinks.Controls.Add(_footerAboutLink);
+        _footerLinks.Controls.Add(_footerUpdatesLink);
+
+        _footerBar.Controls.Add(_statusLabel);
+        _footerBar.Controls.Add(_footerLinks);
+        Controls.Add(_footerBar);
+
+        // --- Menu ---
+        _mainMenu = new MenuStrip
         {
             Dock = DockStyle.Top,
-            Height = 64,
-            BackColor = UiTheme.Accent
-        };
-        var title = new Label
-        {
-            Text = "ZoneShift",
-            Font = UiTheme.TitleFont,
-            ForeColor = Color.White,
-            BackColor = UiTheme.Accent,
-            AutoSize = false,
-            Location = new Point(20, 8),
-            Size = new Size(400, 28)
-        };
-        var subtitle = new Label
-        {
-            Text = "Live clocks - convert from your zone or into your zone",
+            BackColor = UiTheme.HeaderBack,
+            ForeColor = UiTheme.TextPrimary,
             Font = UiTheme.BodyFont,
-            ForeColor = Color.FromArgb(199, 210, 254),
-            BackColor = UiTheme.Accent,
-            AutoSize = false,
-            Location = new Point(22, 36),
-            Size = new Size(500, 20)
+            Renderer = new ThemeMenuRenderer(),
+            Padding = new Padding(4, 2, 0, 2)
         };
-        header.Controls.Add(title);
-        header.Controls.Add(subtitle);
+
+        var viewMenu = new ToolStripMenuItem("&View") { ForeColor = UiTheme.TextPrimary };
+        var themeMenu = new ToolStripMenuItem("&Theme");
+        foreach (var palette in ThemePalette.All)
+        {
+            var id = palette.Id;
+            var item = new ToolStripMenuItem(palette.DisplayName)
+            {
+                Tag = id,
+                Checked = id == UiTheme.CurrentId,
+                CheckOnClick = false
+            };
+            item.Click += (_, _) => SelectTheme(id);
+            _themeMenuItems.Add(item);
+            themeMenu.DropDownItems.Add(item);
+        }
+        // Short descriptions under the submenu (tooltips via text suffix on first open)
+        themeMenu.DropDownItems[0].ToolTipText = "Newsroom amber LEDs on dark studio wall";
+        themeMenu.DropDownItems[1].ToolTipText = "Original light UI with indigo accents";
+        themeMenu.DropDownItems[2].ToolTipText = "Cyberpunk cyan clocks and magenta neon";
+        viewMenu.DropDownItems.Add(themeMenu);
+        _mainMenu.Items.Add(viewMenu);
+
+        var editMenu = new ToolStripMenuItem("&Edit") { ForeColor = UiTheme.TextPrimary };
+        editMenu.DropDownItems.Add("Copy multi-line", null, (_, _) => CopyResults(oneLine: false));
+        editMenu.DropDownItems.Add("Copy one line (chat)", null, (_, _) => CopyResults(oneLine: true));
+        _mainMenu.Items.Add(editMenu);
+
+        var helpMenu = new ToolStripMenuItem("&Help") { ForeColor = UiTheme.TextPrimary };
+        helpMenu.DropDownItems.Add("Tips...", null, (_, _) => ShowOnboarding(force: true));
+        _menuCheckUpdates = new ToolStripMenuItem("Check for &updates...", null,
+            async (_, _) => await CheckForUpdatesAsync());
+        helpMenu.DropDownItems.Add(_menuCheckUpdates);
+        helpMenu.DropDownItems.Add(new ToolStripSeparator());
+        helpMenu.DropDownItems.Add("&About ZoneShift...", null, (_, _) => ShowAbout());
+        _mainMenu.Items.Add(helpMenu);
+
+        MainMenuStrip = _mainMenu;
+        Controls.Add(_mainMenu);
+
+        // --- Brand strip ---
+        var header = new StudioHeader
+        {
+            Dock = DockStyle.Top,
+            Height = LayoutMetrics.HeaderH
+        };
+        _brandTitle = new Label
+        {
+            Text = "ZONESHIFT",
+            Font = new Font("Segoe UI Semibold", 15f),
+            ForeColor = UiTheme.ClockFore,
+            BackColor = UiTheme.HeaderBack,
+            AutoSize = false,
+            Location = new Point(LayoutMetrics.HeaderPadX, 10),
+            Size = new Size(240, 24)
+        };
+        _brandSubtitle = new Label
+        {
+            Text = UiTheme.Tagline,
+            Font = new Font("Segoe UI", 8f),
+            ForeColor = UiTheme.TextSecondary,
+            BackColor = UiTheme.HeaderBack,
+            AutoSize = false,
+            Location = new Point(LayoutMetrics.HeaderPadX + 2, 34),
+            Size = new Size(440, 14)
+        };
+        _liveBadge = new LiveBadgeControl
+        {
+            Location = new Point(680, 16),
+            Size = new Size(82, 24),
+            IsLive = true
+        };
+        header.Controls.Add(_brandTitle);
+        header.Controls.Add(_brandSubtitle);
+        header.Controls.Add(_liveBadge);
+        header.Resize += (_, _) =>
+            _liveBadge.Left = Math.Max(420, header.ClientSize.Width - _liveBadge.Width - LayoutMetrics.HeaderPadX);
         Controls.Add(header);
 
-        // Options card
-        var optionsWrap = new Panel
+        // --- Control toolbar ---
+        var toolbarWrap = new Panel
         {
             Dock = DockStyle.Top,
-            Height = 142,
+            Height = LayoutMetrics.ToolbarOuterH,
             BackColor = UiTheme.AppBackground,
-            Padding = new Padding(16, 10, 16, 0)
+            Padding = new Padding(LayoutMetrics.OuterX, LayoutMetrics.OuterY, LayoutMetrics.OuterX, 0)
         };
-        var optionsCard = new Panel
+        _toolbarHost = new StudioPanel
         {
-            Dock = DockStyle.Fill,
-            BackColor = UiTheme.CardBackground,
-            BorderStyle = BorderStyle.FixedSingle,
-            Padding = new Padding(12)
+            Dock = DockStyle.Fill
         };
+        var toolbar = _toolbarHost;
+        var tx = LayoutMetrics.ToolbarInnerPadX;
+        var ty = LayoutMetrics.ToolbarInnerPadY;
+        var th = LayoutMetrics.ToolbarControlH;
 
-        var dirCap = MakeCaption("CONVERSION DIRECTION");
-        dirCap.Location = new Point(12, 8);
-        dirCap.Size = new Size(200, 16);
-        _directionToggle.Location = new Point(12, 26);
-        _directionToggle.Size = new Size(280, 32);
+        _directionToggle.Location = new Point(tx, ty);
+        _directionToggle.Size = new Size(236, th);
         _directionToggle.SelectionChanged += OnDirectionChanged;
 
-        var fmtCap = MakeCaption("CLOCK FORMAT");
-        fmtCap.Location = new Point(320, 8);
-        fmtCap.Size = new Size(160, 16);
-        _formatToggle.Location = new Point(320, 26);
-        _formatToggle.Size = new Size(200, 32);
+        _formatToggle.Location = new Point(tx + 236 + LayoutMetrics.ToolbarGap, ty);
+        _formatToggle.Size = new Size(156, th);
         _formatToggle.SelectionChanged += OnFormatChanged;
 
-        _overlayCheck.Text = "Desktop overlay";
-        _overlayCheck.Font = new Font("Segoe UI Semibold", 9f);
+        var cardFace = UiTheme.CardFace;
+        var checkX = tx + 236 + LayoutMetrics.ToolbarGap + 156 + LayoutMetrics.ToolbarGap + 4;
+
+        _overlayCheck.Text = "Overlay";
+        _overlayCheck.Font = new Font("Segoe UI Semibold", 8.5f);
         _overlayCheck.ForeColor = UiTheme.TextPrimary;
-        _overlayCheck.BackColor = UiTheme.CardBackground;
+        _overlayCheck.BackColor = cardFace;
+        _overlayCheck.FlatStyle = FlatStyle.Flat;
         _overlayCheck.AutoSize = true;
-        _overlayCheck.Location = new Point(12, 68);
+        _overlayCheck.Location = new Point(checkX, ty + 6);
         _overlayCheck.CheckedChanged += OnOverlayCheckChanged;
 
-        _closeToTrayCheck.Text = "Close minimizes to tray";
-        _closeToTrayCheck.Font = new Font("Segoe UI Semibold", 9f);
+        _closeToTrayCheck.Text = "Close to tray";
+        _closeToTrayCheck.Font = new Font("Segoe UI Semibold", 8.5f);
         _closeToTrayCheck.ForeColor = UiTheme.TextPrimary;
-        _closeToTrayCheck.BackColor = UiTheme.CardBackground;
+        _closeToTrayCheck.BackColor = cardFace;
+        _closeToTrayCheck.FlatStyle = FlatStyle.Flat;
         _closeToTrayCheck.AutoSize = true;
-        _closeToTrayCheck.Location = new Point(150, 68);
+        _closeToTrayCheck.Location = new Point(checkX + 90, ty + 6);
         _closeToTrayCheck.CheckedChanged += (_, _) =>
         {
             if (_suppressEvents) return;
@@ -366,45 +474,14 @@ public sealed class MainForm : Form
             PersistSettings();
         };
 
-        var aboutLink = new LinkLabel
-        {
-            Text = "About",
-            Location = new Point(360, 70),
-            AutoSize = true,
-            LinkColor = UiTheme.Accent,
-            ActiveLinkColor = UiTheme.Accent,
-            BackColor = UiTheme.CardBackground
-        };
-        aboutLink.LinkClicked += (_, _) => ShowAbout();
-
-        _updateButton.Text = "Check updates";
-        _updateButton.FlatStyle = FlatStyle.Flat;
-        _updateButton.Font = UiTheme.CaptionFont;
-        _updateButton.ForeColor = UiTheme.Accent;
-        _updateButton.BackColor = UiTheme.AccentSoft;
-        _updateButton.FlatAppearance.BorderSize = 0;
-        _updateButton.Cursor = Cursors.Hand;
-        _updateButton.Size = new Size(100, 24);
-        _updateButton.Location = new Point(420, 66);
-        _updateButton.Click += async (_, _) => await CheckForUpdatesAsync();
-
         _copyButton.Text = "Copy";
-        _copyButton.FlatStyle = FlatStyle.Flat;
-        _copyButton.Font = UiTheme.CaptionFont;
-        _copyButton.ForeColor = UiTheme.Accent;
-        _copyButton.BackColor = UiTheme.AccentSoft;
-        _copyButton.FlatAppearance.BorderSize = 0;
-        _copyButton.Cursor = Cursors.Hand;
-        _copyButton.Size = new Size(70, 24);
-        _copyButton.Location = new Point(530, 66);
+        _copyButton.Size = new Size(72, th);
+        _copyButton.Location = new Point(620, ty);
+        UiTheme.StylePrimaryButton(_copyButton);
         var copyMenu = new ContextMenuStrip();
         copyMenu.Items.Add("Copy multi-line", null, (_, _) => CopyResults(oneLine: false));
         copyMenu.Items.Add("Copy one line (chat)", null, (_, _) => CopyResults(oneLine: true));
-        _copyButton.Click += (_, _) =>
-        {
-            // Left-click: multi-line; right-click menu also available
-            CopyResults(oneLine: false);
-        };
+        _copyButton.Click += (_, _) => CopyResults(oneLine: false);
         _copyButton.MouseUp += (_, e) =>
         {
             if (e.Button == MouseButtons.Right)
@@ -412,264 +489,375 @@ public sealed class MainForm : Form
         };
         _copyButton.ContextMenuStrip = copyMenu;
 
-        var tipsLink = new LinkLabel
+        toolbar.Controls.Add(_directionToggle);
+        toolbar.Controls.Add(_formatToggle);
+        toolbar.Controls.Add(_overlayCheck);
+        toolbar.Controls.Add(_closeToTrayCheck);
+        toolbar.Controls.Add(_copyButton);
+        toolbar.Resize += (_, _) =>
         {
-            Text = "Tips",
-            Location = new Point(12, 96),
-            AutoSize = true,
-            LinkColor = UiTheme.Accent,
-            BackColor = UiTheme.CardBackground
+            _copyButton.Left = Math.Max(
+                checkX + 200,
+                toolbar.ClientSize.Width - _copyButton.Width - LayoutMetrics.ToolbarInnerPadX);
+            _copyButton.Top = ty;
         };
-        tipsLink.LinkClicked += (_, _) => ShowOnboarding(force: true);
+        toolbarWrap.Controls.Add(toolbar);
+        Controls.Add(toolbarWrap);
 
-        optionsCard.Controls.Add(dirCap);
-        optionsCard.Controls.Add(_directionToggle);
-        optionsCard.Controls.Add(fmtCap);
-        optionsCard.Controls.Add(_formatToggle);
-        optionsCard.Controls.Add(_overlayCheck);
-        optionsCard.Controls.Add(_closeToTrayCheck);
-        optionsCard.Controls.Add(aboutLink);
-        optionsCard.Controls.Add(_updateButton);
-        optionsCard.Controls.Add(_copyButton);
-        optionsCard.Controls.Add(tipsLink);
-        optionsWrap.Controls.Add(optionsCard);
-        Controls.Add(optionsWrap);
-
-        // Source card
+        // --- Master clock + input ---
         _sourceWrap = new Panel
         {
             Dock = DockStyle.Top,
-            Height = 200,
+            Height = LayoutMetrics.SourceHNormal,
             BackColor = UiTheme.AppBackground,
-            Padding = new Padding(16, 10, 16, 0)
+            Padding = new Padding(LayoutMetrics.OuterX, LayoutMetrics.OuterY, LayoutMetrics.OuterX, 0)
         };
-        var sourceCard = new Panel
+        var sourceCard = new StudioPanel
         {
             Dock = DockStyle.Fill,
-            BackColor = UiTheme.CardBackground,
-            BorderStyle = BorderStyle.FixedSingle
+            // Docked hosts (left + clock) sit inside the rounded card
+            Padding = new Padding(LayoutMetrics.CardPad)
         };
 
-        // Right: primary clock (docked so it never overlaps left fields)
-        var clockHost = new Panel
+        _clockHost = new Panel
         {
             Dock = DockStyle.Right,
-            Width = 270,
-            BackColor = UiTheme.CardBackground,
-            Padding = new Padding(8, 16, 12, 16)
+            Width = LayoutMetrics.ClockHostW,
+            BackColor = cardFace,
+            Padding = new Padding(LayoutMetrics.ClockHostPad)
         };
         _primaryClock.Dock = DockStyle.Fill;
-        clockHost.Controls.Add(_primaryClock);
+        _primaryClock.ZoneText = "LOCAL";
+        _primaryClock.BlinkColons = true;
+        _clockHost.Controls.Add(_primaryClock);
 
-        // Left: form fields
-        var leftHost = new Panel
+        // Absolute layout — coordinates are relative to leftHost (already inset by sourceCard.Padding)
+        _leftHost = new Panel
         {
             Dock = DockStyle.Fill,
-            BackColor = UiTheme.CardBackground,
-            Padding = new Padding(12, 8, 8, 8)
+            BackColor = cardFace,
+            Padding = new Padding(0, 0, 10, 0) // gap before master LED
         };
 
-        _sourceSectionTitle.Text = "Your time";
+        _sourceSectionTitle.Text = "Master clock";
         _sourceSectionTitle.Font = UiTheme.SectionFont;
-        _sourceSectionTitle.ForeColor = UiTheme.TextPrimary;
-        _sourceSectionTitle.BackColor = UiTheme.CardBackground;
+        _sourceSectionTitle.ForeColor = UiTheme.Accent;
+        _sourceSectionTitle.BackColor = cardFace;
         _sourceSectionTitle.AutoSize = false;
-        _sourceSectionTitle.Location = new Point(0, 0);
-        _sourceSectionTitle.Size = new Size(360, 22);
 
-        var localCap = MakeCaption("YOUR PC TIMEZONE");
-        localCap.Location = new Point(0, 26);
-        localCap.Size = new Size(360, 14);
-
+        StyleCaption(_localZoneCaption, "YOUR PC TIMEZONE");
         _localTimezoneLabel.Font = new Font("Segoe UI Semibold", 9f);
         _localTimezoneLabel.ForeColor = UiTheme.TextPrimary;
-        _localTimezoneLabel.BackColor = UiTheme.CardBackground;
+        _localTimezoneLabel.BackColor = cardFace;
         _localTimezoneLabel.AutoSize = false;
         _localTimezoneLabel.AutoEllipsis = true;
-        _localTimezoneLabel.Location = new Point(0, 42);
-        _localTimezoneLabel.Size = new Size(380, 20);
 
-        _reverseZoneRow.Location = new Point(0, 66);
-        _reverseZoneRow.Size = new Size(380, 48);
-        _reverseZoneRow.BackColor = UiTheme.CardBackground;
-        _inputZoneCaption.Text = "ENTER TIME IN THIS TIMEZONE";
-        _inputZoneCaption.Font = UiTheme.CaptionFont;
-        _inputZoneCaption.ForeColor = UiTheme.TextMuted;
-        _inputZoneCaption.BackColor = UiTheme.CardBackground;
-        _inputZoneCaption.AutoSize = false;
-        _inputZoneCaption.Location = new Point(0, 0);
-        _inputZoneCaption.Size = new Size(370, 14);
-        _reverseSourceTimezone.Location = new Point(0, 16);
-        _reverseSourceTimezone.Size = new Size(370, 26);
+        _reverseZoneRow.BackColor = cardFace;
+        StyleCaption(_inputZoneCaption, "ENTER TIME IN THIS TIMEZONE");
         _reverseSourceTimezone.Font = UiTheme.BodyFont;
         _reverseSourceTimezone.SelectedIndexChanged += OnReverseSourceChanged;
         _reverseZoneRow.Controls.Add(_inputZoneCaption);
         _reverseZoneRow.Controls.Add(_reverseSourceTimezone);
 
         _liveModeCheck.Text = "Use current time (live)";
-        _liveModeCheck.Font = new Font("Segoe UI Semibold", 9f);
+        _liveModeCheck.Font = new Font("Segoe UI Semibold", 8.5f);
         _liveModeCheck.ForeColor = UiTheme.TextPrimary;
-        _liveModeCheck.BackColor = UiTheme.CardBackground;
+        _liveModeCheck.BackColor = cardFace;
+        _liveModeCheck.FlatStyle = FlatStyle.Flat;
         _liveModeCheck.AutoSize = true;
-        _liveModeCheck.Location = new Point(0, 118);
         _liveModeCheck.Checked = true;
         _liveModeCheck.CheckedChanged += OnLiveModeChanged;
 
         _useNowButton.Text = "Reset to now";
-        _useNowButton.FlatStyle = FlatStyle.Flat;
+        _useNowButton.Size = new Size(104, 26);
+        UiTheme.StylePrimaryButton(_useNowButton);
         _useNowButton.Font = UiTheme.CaptionFont;
-        _useNowButton.ForeColor = UiTheme.Accent;
-        _useNowButton.BackColor = UiTheme.AccentSoft;
-        _useNowButton.FlatAppearance.BorderSize = 0;
-        _useNowButton.Cursor = Cursors.Hand;
-        _useNowButton.Size = new Size(96, 24);
-        _useNowButton.Location = new Point(190, 116);
         _useNowButton.Click += (_, _) => EnterLiveMode();
         _useNowButton.Visible = false;
 
-        _dateFieldCaption.Text = "DATE";
-        _dateFieldCaption.Font = UiTheme.CaptionFont;
-        _dateFieldCaption.ForeColor = UiTheme.TextMuted;
-        _dateFieldCaption.BackColor = UiTheme.CardBackground;
-        _dateFieldCaption.AutoSize = false;
-        _dateFieldCaption.Location = new Point(0, 146);
-        _dateFieldCaption.Size = new Size(120, 14);
+        StyleCaption(_dateFieldCaption, "DATE");
         _datePicker.Format = DateTimePickerFormat.Short;
-        _datePicker.Location = new Point(0, 162);
-        _datePicker.Size = new Size(150, 24);
+        _datePicker.Size = new Size(148, 26);
         _datePicker.ValueChanged += OnInputChanged;
 
-        _timeFieldCaption.Text = "TIME (pick or type)";
-        _timeFieldCaption.Font = UiTheme.CaptionFont;
-        _timeFieldCaption.ForeColor = UiTheme.TextMuted;
-        _timeFieldCaption.BackColor = UiTheme.CardBackground;
-        _timeFieldCaption.AutoSize = false;
-        _timeFieldCaption.Location = new Point(166, 146);
-        _timeFieldCaption.Size = new Size(160, 14);
-        _timeEntry.Location = new Point(166, 162);
-        _timeEntry.Size = new Size(150, 24);
+        StyleCaption(_timeFieldCaption, "TIME");
+        _timeEntry.Size = new Size(148, 26);
         _timeEntry.Font = UiTheme.BodyFont;
         _timeEntry.Configure(use24Hour: false, includeSeconds: false);
         _timeEntry.TimeChanged += OnInputChanged;
 
-        leftHost.Controls.Add(_sourceSectionTitle);
-        leftHost.Controls.Add(localCap);
-        leftHost.Controls.Add(_localTimezoneLabel);
-        leftHost.Controls.Add(_reverseZoneRow);
-        leftHost.Controls.Add(_liveModeCheck);
-        leftHost.Controls.Add(_useNowButton);
-        leftHost.Controls.Add(_dateFieldCaption);
-        leftHost.Controls.Add(_datePicker);
-        leftHost.Controls.Add(_timeFieldCaption);
-        leftHost.Controls.Add(_timeEntry);
+        _leftHost.Controls.Add(_sourceSectionTitle);
+        _leftHost.Controls.Add(_localZoneCaption);
+        _leftHost.Controls.Add(_localTimezoneLabel);
+        _leftHost.Controls.Add(_reverseZoneRow);
+        _leftHost.Controls.Add(_liveModeCheck);
+        _leftHost.Controls.Add(_useNowButton);
+        _leftHost.Controls.Add(_dateFieldCaption);
+        _leftHost.Controls.Add(_datePicker);
+        _leftHost.Controls.Add(_timeFieldCaption);
+        _leftHost.Controls.Add(_timeEntry);
 
-        sourceCard.Controls.Add(leftHost);
-        sourceCard.Controls.Add(clockHost);
+        LayoutMasterFields(reverse: false);
+        _leftHost.Resize += (_, _) => LayoutMasterFields(ConvertToLocal);
+
+        sourceCard.Controls.Add(_leftHost);
+        sourceCard.Controls.Add(_clockHost);
         _sourceWrap.Controls.Add(sourceCard);
         Controls.Add(_sourceWrap);
 
-        // Targets card (fills remaining space)
-        var targetsWrap = new Panel
+        // --- World clock wall ---
+        var wallWrap = new Panel
         {
             Dock = DockStyle.Fill,
             BackColor = UiTheme.AppBackground,
-            Padding = new Padding(16, 10, 16, 8)
+            Padding = new Padding(
+                LayoutMetrics.OuterX,
+                LayoutMetrics.OuterY,
+                LayoutMetrics.OuterX,
+                LayoutMetrics.OuterBottom)
         };
-        var targetsCard = new Panel
+        var wallCard = new StudioPanel
         {
             Dock = DockStyle.Fill,
-            BackColor = UiTheme.CardBackground,
-            BorderStyle = BorderStyle.FixedSingle
+            Padding = new Padding(2)
         };
 
-        var targetsHeader = new Panel
+        _wallHeader = new Panel
         {
             Dock = DockStyle.Top,
-            Height = 34,
-            BackColor = UiTheme.CardBackground,
-            Padding = new Padding(12, 6, 12, 0)
+            Height = LayoutMetrics.WallHeaderH,
+            BackColor = cardFace,
+            Padding = new Padding(LayoutMetrics.CardPad, 8, LayoutMetrics.CardPad, 4)
         };
-        var section = new Label
+        _wallSectionLabel = new Label
         {
-            Text = "Other timezones",
+            Text = "WORLD CLOCK WALL",
             Font = UiTheme.SectionFont,
-            ForeColor = UiTheme.TextPrimary,
-            BackColor = UiTheme.CardBackground,
+            ForeColor = UiTheme.ClockFore,
+            BackColor = cardFace,
             AutoSize = false,
             Dock = DockStyle.Left,
-            Width = 180,
+            Width = 200,
             TextAlign = ContentAlignment.MiddleLeft
         };
         _targetCountLabel = new Label
         {
             Text = "",
             Font = UiTheme.CaptionFont,
-            ForeColor = UiTheme.TextMuted,
-            BackColor = UiTheme.CardBackground,
+            ForeColor = UiTheme.TextSecondary,
+            BackColor = cardFace,
             AutoSize = false,
             Dock = DockStyle.Right,
-            Width = 80,
+            Width = 100,
             TextAlign = ContentAlignment.MiddleRight
         };
-        targetsHeader.Controls.Add(_targetCountLabel);
-        targetsHeader.Controls.Add(section);
+        _wallHeader.Controls.Add(_targetCountLabel);
+        _wallHeader.Controls.Add(_wallSectionLabel);
 
-        var footer = new Panel
+        _wallFooter = new Panel
         {
-            Height = 42,
+            Height = LayoutMetrics.WallFooterH,
             Dock = DockStyle.Bottom,
-            BackColor = UiTheme.CardBackground,
-            Padding = new Padding(12, 6, 12, 6)
+            BackColor = cardFace,
+            Padding = new Padding(LayoutMetrics.CardPad, 8, LayoutMetrics.CardPad, 10)
         };
-        _addTimezoneButton.Text = "+ Add timezone";
-        _addTimezoneButton.FlatStyle = FlatStyle.Flat;
-        _addTimezoneButton.Font = new Font("Segoe UI Semibold", 9f);
-        _addTimezoneButton.ForeColor = UiTheme.Accent;
-        _addTimezoneButton.BackColor = UiTheme.AccentSoft;
-        _addTimezoneButton.FlatAppearance.BorderSize = 0;
-        _addTimezoneButton.Cursor = Cursors.Hand;
+        var wallFooter = _wallFooter;
+        _addTimezoneButton.Text = "+ Add clock";
         _addTimezoneButton.Dock = DockStyle.Left;
-        _addTimezoneButton.Width = 140;
+        _addTimezoneButton.Width = 128;
+        UiTheme.StylePrimaryButton(_addTimezoneButton);
         _addTimezoneButton.Click += (_, _) => AddTargetRow(selectAbbreviation: null, persist: true);
-        footer.Controls.Add(_addTimezoneButton);
+        wallFooter.Controls.Add(_addTimezoneButton);
 
         _targetListHost = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
             AutoScroll = true,
-            FlowDirection = FlowDirection.TopDown,
-            WrapContents = false,
-            BackColor = UiTheme.CardBackground,
-            Padding = new Padding(8, 4, 8, 4)
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true,
+            BackColor = UiTheme.WallBack,
+            Padding = new Padding(LayoutMetrics.WallListPad)
         };
-        _targetListHost.Resize += (_, _) =>
+        _targetListHost.Paint += (_, e) =>
         {
-            var w = Math.Max(360, _targetListHost.ClientSize.Width - 28);
-            foreach (Control c in _targetListHost.Controls)
-                c.Width = w;
+            UiPaint.PaintWallBackground(e.Graphics, _targetListHost.ClientRectangle);
         };
 
-        // Fill first, then bottom, then top (docking order)
-        targetsCard.Controls.Add(_targetListHost);
-        targetsCard.Controls.Add(footer);
-        targetsCard.Controls.Add(targetsHeader);
+        wallCard.Controls.Add(_targetListHost);
+        wallCard.Controls.Add(wallFooter);
+        wallCard.Controls.Add(_wallHeader);
+        wallWrap.Controls.Add(wallCard);
+        Controls.Add(wallWrap);
 
-        targetsWrap.Controls.Add(targetsCard);
-        Controls.Add(targetsWrap);
-
-        // Dock order: Fill first, then Tops, Bottom already added.
-        // Bring header/options/source to correct z by setting child index.
-        // With Dock: add Fill last among fills; Tops added after Fill end up above Fill.
-        // Correct approach: Controls order - Bottom, Fill, then Tops from bottom to top of screen.
-        // We already added: status(Bottom), header(Top), options(Top), source(Top), targets(Fill).
-        // Re-order so Fill is under Tops:
-        Controls.SetChildIndex(targetsWrap, 0);
+        // Dock z-order: Fill under Tops; Bottom already docked
+        Controls.SetChildIndex(wallWrap, 0);
         Controls.SetChildIndex(_sourceWrap, 1);
-        Controls.SetChildIndex(optionsWrap, 2);
+        Controls.SetChildIndex(toolbarWrap, 2);
         Controls.SetChildIndex(header, 3);
-        Controls.SetChildIndex(_statusLabel, 4);
+        Controls.SetChildIndex(_mainMenu, 4);
+        Controls.SetChildIndex(_footerBar, 5);
 
         ResumeLayout(true);
+    }
+
+    private void SelectTheme(AppThemeId id)
+    {
+        if (UiTheme.CurrentId == id)
+            return;
+
+        UiTheme.SetTheme(id, raiseEvent: true);
+        _settings.Theme = id.ToString();
+        ApplyChromeTheme();
+        PersistSettings();
+        RefreshDisplays();
+        _statusLabel.Text = $"Theme: {UiTheme.DisplayName}";
+        _statusLabel.ForeColor = UiTheme.Success;
+    }
+
+    private void SyncThemeMenuChecks()
+    {
+        foreach (var item in _themeMenuItems)
+        {
+            item.Checked = item.Tag is AppThemeId id && id == UiTheme.CurrentId;
+            item.ForeColor = UiTheme.TextPrimary;
+        }
+    }
+
+    /// <summary>Repaint non-self-updating chrome after a theme switch.</summary>
+    private void ApplyChromeTheme()
+    {
+        BackColor = UiTheme.AppBackground;
+        var card = UiTheme.CardFace;
+
+        _mainMenu.BackColor = UiTheme.HeaderBack;
+        _mainMenu.ForeColor = UiTheme.TextPrimary;
+        foreach (ToolStripItem item in _mainMenu.Items)
+            item.ForeColor = UiTheme.TextPrimary;
+        SyncThemeMenuChecks();
+
+        _brandTitle.ForeColor = UiTheme.ClockFore;
+        _brandTitle.BackColor = UiTheme.HeaderBack;
+        _brandSubtitle.Text = UiTheme.Tagline;
+        _brandSubtitle.ForeColor = UiTheme.TextSecondary;
+        _brandSubtitle.BackColor = UiTheme.HeaderBack;
+
+        _footerBar.BackColor = UiTheme.FooterBack;
+        _footerLinks.BackColor = UiTheme.FooterBack;
+        _statusLabel.BackColor = UiTheme.FooterBack;
+        _statusLabel.ForeColor = UiTheme.TextSecondary;
+        StyleFooterLink(_footerTipsLink);
+        StyleFooterLink(_footerAboutLink);
+        StyleFooterLink(_footerUpdatesLink);
+
+        _overlayCheck.ForeColor = UiTheme.TextPrimary;
+        _overlayCheck.BackColor = card;
+        _closeToTrayCheck.ForeColor = UiTheme.TextPrimary;
+        _closeToTrayCheck.BackColor = card;
+        UiTheme.StylePrimaryButton(_copyButton);
+        UiTheme.StylePrimaryButton(_useNowButton);
+        _useNowButton.Font = UiTheme.CaptionFont;
+        UiTheme.StylePrimaryButton(_addTimezoneButton);
+
+        if (_clockHost is not null) _clockHost.BackColor = card;
+        if (_leftHost is not null) _leftHost.BackColor = card;
+        if (_wallHeader is not null) _wallHeader.BackColor = card;
+        if (_wallFooter is not null) _wallFooter.BackColor = card;
+        if (_targetListHost is not null) _targetListHost.BackColor = UiTheme.WallBack;
+
+        _sourceSectionTitle.ForeColor = UiTheme.Accent;
+        _sourceSectionTitle.BackColor = card;
+        StyleCaption(_localZoneCaption, _localZoneCaption.Text);
+        _localTimezoneLabel.ForeColor = UiTheme.TextPrimary;
+        _localTimezoneLabel.BackColor = card;
+        _reverseZoneRow.BackColor = card;
+        StyleCaption(_inputZoneCaption, _inputZoneCaption.Text);
+        _liveModeCheck.ForeColor = UiTheme.TextPrimary;
+        _liveModeCheck.BackColor = card;
+        StyleCaption(_dateFieldCaption, _dateFieldCaption.Text);
+        StyleCaption(_timeFieldCaption, _timeFieldCaption.Text);
+
+        _wallSectionLabel.ForeColor = UiTheme.ClockFore;
+        _wallSectionLabel.BackColor = card;
+        _targetCountLabel.ForeColor = UiTheme.TextSecondary;
+        _targetCountLabel.BackColor = card;
+
+        UiTheme.StyleInput(_reverseSourceTimezone);
+        UiTheme.StyleInput(_timeEntry);
+
+        foreach (var row in _targetRows)
+            row.ApplyTheme();
+        RefreshFavoriteVisuals();
+
+        Invalidate(true);
+    }
+
+    private static LinkLabel MakeFooterLink(string text, int x, int y = 8)
+    {
+        var link = new LinkLabel
+        {
+            Text = text,
+            AutoSize = true,
+            Location = new Point(x, y),
+            BackColor = UiTheme.FooterBack,
+            Font = new Font("Segoe UI Semibold", 8.25f)
+        };
+        StyleFooterLink(link);
+        return link;
+    }
+
+    private static void StyleCaption(Label label, string text)
+    {
+        label.Text = text;
+        label.Font = UiTheme.CaptionFont;
+        label.ForeColor = UiTheme.TextSecondary;
+        label.BackColor = UiTheme.CardFace;
+        label.AutoSize = false;
+        label.TextAlign = ContentAlignment.MiddleLeft;
+    }
+
+    private static void StyleFooterLink(LinkLabel link)
+    {
+        link.LinkColor = UiTheme.Accent;
+        link.ActiveLinkColor = UiTheme.AccentHover;
+        link.VisitedLinkColor = UiTheme.Accent;
+        link.DisabledLinkColor = UiTheme.TextMuted;
+        link.BackColor = UiTheme.FooterBack;
+    }
+
+    /// <summary>MenuStrip renderer that tracks the active theme palette.</summary>
+    private sealed class ThemeMenuRenderer : ToolStripProfessionalRenderer
+    {
+        public ThemeMenuRenderer() : base(new ThemeColorTable()) { }
+
+        private sealed class ThemeColorTable : ProfessionalColorTable
+        {
+            public override Color MenuStripGradientBegin => UiTheme.HeaderBack;
+            public override Color MenuStripGradientEnd => UiTheme.HeaderBack;
+            public override Color MenuItemSelected => UiTheme.MenuHover;
+            public override Color MenuItemSelectedGradientBegin => UiTheme.MenuHover;
+            public override Color MenuItemSelectedGradientEnd => UiTheme.MenuHover;
+            public override Color MenuItemBorder => UiTheme.AccentSoftBorder;
+            public override Color MenuBorder => UiTheme.CardBorder;
+            public override Color ToolStripDropDownBackground => UiTheme.CardBackground;
+            public override Color ImageMarginGradientBegin => UiTheme.CardBackground;
+            public override Color ImageMarginGradientMiddle => UiTheme.CardBackground;
+            public override Color ImageMarginGradientEnd => UiTheme.CardBackground;
+            public override Color MenuItemPressedGradientBegin => UiTheme.SegmentActive;
+            public override Color MenuItemPressedGradientEnd => UiTheme.SegmentActive;
+        }
+
+        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+        {
+            if (e.Item.Selected && e.Item.Pressed)
+                e.TextColor = UiTheme.TextOnAccent;
+            else if (e.Item.Selected)
+                e.TextColor = UiTheme.Accent;
+            else if (e.Item is ToolStripMenuItem { Checked: true })
+                e.TextColor = UiTheme.Accent;
+            else
+                e.TextColor = UiTheme.TextPrimary;
+            base.OnRenderItemText(e);
+        }
     }
 
     private void RebuildTargetListUi()
@@ -680,17 +868,13 @@ public sealed class MainForm : Form
         _targetListHost.SuspendLayout();
         _targetListHost.Controls.Clear();
 
-        var rowWidth = Math.Max(360, _targetListHost.ClientSize.Width - 28);
-        if (rowWidth < 360)
-            rowWidth = 600;
-
         for (var i = 0; i < _targetRows.Count; i++)
         {
             _targetRows[i].SetIndex(i + 1);
             _targetRows[i].RemoveButton.Enabled = _targetRows.Count > MinTargetZones;
-            _targetRows[i].Root.Width = rowWidth;
-            _targetRows[i].Root.Height = TargetZoneRow.RowHeight;
-            _targetRows[i].Root.Margin = new Padding(0, 0, 0, 4);
+            _targetRows[i].Root.Width = TargetZoneRow.TileWidth;
+            _targetRows[i].Root.Height = TargetZoneRow.TileHeight;
+            _targetRows[i].Root.Margin = new Padding(LayoutMetrics.TileMargin);
             _targetListHost.Controls.Add(_targetRows[i].Root);
         }
 
@@ -794,11 +978,27 @@ public sealed class MainForm : Form
         {
             Text = text,
             Font = UiTheme.CaptionFont,
-            ForeColor = UiTheme.TextMuted,
-            BackColor = UiTheme.CardBackground,
+            ForeColor = UiTheme.TextSecondary,
+            BackColor = UiTheme.CardFace,
             AutoSize = false,
             TextAlign = ContentAlignment.MiddleLeft
         };
+
+    private void SetUpdateUiBusy(bool busy)
+    {
+        _updateBusy = busy;
+        if (_menuCheckUpdates is not null)
+            _menuCheckUpdates.Enabled = !busy;
+        if (_footerUpdatesLink is not null)
+            _footerUpdatesLink.Enabled = !busy;
+    }
+
+    private void UpdateLiveBadge()
+    {
+        if (_liveBadge is not null)
+            _liveBadge.IsLive = _liveMode;
+        _primaryClock.BlinkColons = _liveMode;
+    }
 
     private void SetupLiveTimer()
     {
@@ -816,32 +1016,60 @@ public sealed class MainForm : Form
     private void ApplyDirectionUi()
     {
         var reverse = ConvertToLocal;
-        _sourceSectionTitle.Text = reverse ? "Enter time in another timezone" : "Your time";
-        _reverseZoneRow.Visible = reverse;
+        _sourceSectionTitle.Text = reverse ? "Enter time in another timezone" : "Master clock";
+        LayoutMasterFields(reverse);
+    }
 
-        // Fixed Y bands inside leftHost (0,0 origin)
+    /// <summary>
+    /// Positions master-section fields with consistent vertical rhythm.
+    /// Absolute coords start at LayoutMetrics.ContentX/Y (not flush to the card edge —
+    /// the host is already inset by StudioPanel.Padding).
+    /// </summary>
+    private void LayoutMasterFields(bool reverse)
+    {
+        if (_leftHost is null || _sourceWrap is null)
+            return;
+
+        const int x = LayoutMetrics.ContentX;
+        var y = LayoutMetrics.ContentY;
+        // Leave room for clock host + card pad; width scales with host
+        var fieldW = Math.Max(280, _leftHost.ClientSize.Width - x - LayoutMetrics.ContentRightGutter);
+        if (fieldW > 420) fieldW = 420;
+
+        _sourceSectionTitle.SetBounds(x, y, fieldW, 18);
+        y += 22;
+
+        _localZoneCaption.SetBounds(x, y, fieldW, LayoutMetrics.LineCaption);
+        y += LayoutMetrics.LineCaption + 2;
+        _localTimezoneLabel.SetBounds(x, y, fieldW, LayoutMetrics.LineBody);
+        y += LayoutMetrics.LineBody + LayoutMetrics.BlockGap;
+
+        _reverseZoneRow.Visible = reverse;
         if (reverse)
         {
-            if (_sourceWrap is not null)
-                _sourceWrap.Height = 220;
-            _liveModeCheck.Location = new Point(0, 118);
-            _useNowButton.Location = new Point(190, 116);
-            _dateFieldCaption.Location = new Point(0, 146);
-            _timeFieldCaption.Location = new Point(166, 146);
-            _datePicker.Location = new Point(0, 162);
-            _timeEntry.Location = new Point(166, 162);
+            _reverseZoneRow.SetBounds(x, y, fieldW, 48);
+            _inputZoneCaption.SetBounds(0, 0, fieldW, LayoutMetrics.LineCaption);
+            _reverseSourceTimezone.SetBounds(0, 16, fieldW, LayoutMetrics.LineField);
+            y += 48 + LayoutMetrics.BlockGap;
         }
-        else
-        {
-            if (_sourceWrap is not null)
-                _sourceWrap.Height = 190;
-            _liveModeCheck.Location = new Point(0, 72);
-            _useNowButton.Location = new Point(190, 70);
-            _dateFieldCaption.Location = new Point(0, 104);
-            _timeFieldCaption.Location = new Point(166, 104);
-            _datePicker.Location = new Point(0, 120);
-            _timeEntry.Location = new Point(166, 120);
-        }
+
+        _liveModeCheck.Location = new Point(x, y + 2);
+        _useNowButton.Location = new Point(x + 200, y);
+        y += 30;
+
+        _dateFieldCaption.SetBounds(x, y, 148, LayoutMetrics.LineCaption);
+        _timeFieldCaption.SetBounds(x + 164, y, 148, LayoutMetrics.LineCaption);
+        y += LayoutMetrics.LineCaption + 4;
+        _datePicker.SetBounds(x, y, 148, 26);
+        _timeEntry.SetBounds(x + 164, y, 148, 26);
+        y += 30;
+
+        // Host height = content + outer wrap padding + card padding*2 + a little air
+        var contentH = y + LayoutMetrics.ContentY + 8;
+        var wrapH = contentH + LayoutMetrics.CardPad * 2 + LayoutMetrics.OuterY + 4;
+        _sourceWrap.Height = Math.Max(
+            reverse ? LayoutMetrics.SourceHReverse : LayoutMetrics.SourceHNormal,
+            wrapH);
     }
 
     private void OnDirectionChanged(object? sender, EventArgs e)
@@ -892,6 +1120,7 @@ public sealed class MainForm : Form
         _timeEntry.Enabled = false;
         if (!_liveTimer.Enabled)
             _liveTimer.Start();
+        UpdateLiveBadge();
 
         RefreshDisplays();
     }
@@ -903,6 +1132,7 @@ public sealed class MainForm : Form
         _datePicker.Enabled = true;
         _timeEntry.Enabled = true;
         ApplyTimePickerFormat();
+        UpdateLiveBadge();
 
         if (!fromUserToggle || _liveModeCheck.Checked)
         {
@@ -1036,18 +1266,21 @@ public sealed class MainForm : Form
 
     private async Task CheckForUpdatesAsync()
     {
-        _updateButton.Enabled = false;
+        if (_updateBusy)
+            return;
+
+        SetUpdateUiBusy(true);
         _statusLabel.Text = "Checking for updates...";
-        _statusLabel.ForeColor = UiTheme.TextMuted;
+        _statusLabel.ForeColor = UiTheme.TextSecondary;
         try
         {
-            var version = typeof(MainForm).Assembly.GetName().Version?.ToString(3) ?? "1.4.0";
+            var version = typeof(MainForm).Assembly.GetName().Version?.ToString(3) ?? "1.5.0";
             var result = await UpdateChecker.CheckAsync(version);
             if (!result.UpdateAvailable)
             {
                 MessageBox.Show(this, result.Message, "ZoneShift", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 _statusLabel.Text = result.Message;
-                _statusLabel.ForeColor = UiTheme.TextMuted;
+                _statusLabel.ForeColor = UiTheme.TextSecondary;
                 return;
             }
 
@@ -1098,7 +1331,7 @@ public sealed class MainForm : Form
             var progress = new Progress<string>(msg =>
             {
                 _statusLabel.Text = msg;
-                _statusLabel.ForeColor = UiTheme.TextMuted;
+                _statusLabel.ForeColor = UiTheme.TextSecondary;
             });
 
             await UpdateChecker.InstallUpdateAsync(result.SetupDownloadUrl!, result.SetupFileName, progress);
@@ -1116,14 +1349,15 @@ public sealed class MainForm : Form
         }
         finally
         {
-            _updateButton.Enabled = true;
+            SetUpdateUiBusy(false);
         }
     }
 
     private void RestoreWindowBounds()
     {
         // Ignore tiny bounds saved while PerMonitorV2 crushed the layout (~480x560)
-        if (_settings.WindowWidth >= 680 && _settings.WindowHeight >= 700 &&
+        if (_settings.WindowWidth >= LayoutMetrics.MinWidth &&
+            _settings.WindowHeight >= LayoutMetrics.MinHeight &&
             _settings.WindowX >= 0 && _settings.WindowY >= 0 &&
             IsOnScreen(_settings.WindowX, _settings.WindowY))
         {
@@ -1132,7 +1366,7 @@ public sealed class MainForm : Form
         }
         else
         {
-            ClientSize = new Size(700, 780);
+            ClientSize = new Size(LayoutMetrics.ClientWidth, LayoutMetrics.ClientHeight);
         }
     }
 
@@ -1164,6 +1398,7 @@ public sealed class MainForm : Form
             if (_liveMode)
                 SyncPickersToNow();
             ApplyTimePickerFormat();
+            UpdateLiveBadge();
 
             if (string.IsNullOrWhiteSpace(_settings.ReverseSourceWindowsId) ||
                 !_reverseSourceTimezone.SelectWindowsId(_settings.ReverseSourceWindowsId!))
@@ -1491,6 +1726,8 @@ public sealed class MainForm : Form
                 if (row.SelectedOption is not TimezoneOption targetOpt)
                 {
                     row.Clock.TimeText = "--:--";
+                    row.Clock.ZoneText = "---";
+                    row.Clock.CaptionText = "";
                     row.Meta.Text = string.Empty;
                     rowMap.Add(null);
                     continue;
@@ -1513,25 +1750,12 @@ public sealed class MainForm : Form
 
             var primaryTime = snapshot.PrimaryLocalTime;
             var localOffset = snapshot.PrimaryUtcOffset;
-            var inputLabel = GetInputTimezoneLabel();
-            var inputWallTime = snapshot.InputWallTime;
 
-            string primaryCaption;
-            if (ConvertToLocal)
-            {
-                primaryCaption = _liveMode
-                    ? $"Your local (live)  -  {primaryTime:ddd d MMM}  -  {TimeConversionService.FormatOffset(localOffset)}"
-                    : $"{FormatDigitalTime(inputWallTime)} {inputLabel} -> local  -  {primaryTime:ddd d MMM}  -  {TimeConversionService.FormatOffset(localOffset)}";
-            }
-            else
-            {
-                primaryCaption = _liveMode
-                    ? $"Live now  -  {primaryTime:ddd d MMM}  -  {TimeConversionService.FormatOffset(localOffset)}"
-                    : $"Custom local  -  {primaryTime:ddd d MMM}  -  {TimeConversionService.FormatOffset(localOffset)}";
-            }
-
+            _primaryClock.ZoneText = "LOCAL";
             _primaryClock.TimeText = FormatDigitalTime(primaryTime);
-            _primaryClock.CaptionText = primaryCaption;
+            _primaryClock.CaptionText = _liveMode
+                ? $"{primaryTime:ddd d MMM}  {TimeConversionService.FormatOffset(localOffset)}  LIVE"
+                : $"{primaryTime:ddd d MMM}  {TimeConversionService.FormatOffset(localOffset)}";
 
             var overlayZones = new List<(string label, string time, string meta)>();
             var resultIndex = 0;
@@ -1548,6 +1772,8 @@ public sealed class MainForm : Form
                     : $"{TimeConversionService.FormatOffset(r.UtcOffset)}{dayNote}";
 
                 row.Clock.TimeText = FormatDigitalTime(r.LocalWallTime);
+                row.Clock.ZoneText = r.Abbreviation;
+                row.Clock.CaptionText = meta;
                 row.Meta.Text = meta;
                 overlayZones.Add((r.Abbreviation, FormatDigitalTime(r.LocalWallTime), meta));
             }
@@ -1566,7 +1792,7 @@ public sealed class MainForm : Form
             if (!string.IsNullOrWhiteSpace(snapshot.Warning))
             {
                 _statusLabel.Text = snapshot.Warning;
-                _statusLabel.ForeColor = Color.FromArgb(180, 83, 9); // amber warning
+                _statusLabel.ForeColor = UiTheme.Warning;
             }
             else
             {
@@ -1577,7 +1803,7 @@ public sealed class MainForm : Form
                     : (_liveMode
                         ? $"From my zone - live - {_localTimezone.Id} - {_targetRows.Count} zone(s) - {mode}"
                         : $"From my zone - custom - {_localTimezone.Id} - {_targetRows.Count} zone(s) - {mode}");
-                _statusLabel.ForeColor = UiTheme.TextMuted;
+                _statusLabel.ForeColor = UiTheme.TextSecondary;
             }
         }
         catch (Exception ex)

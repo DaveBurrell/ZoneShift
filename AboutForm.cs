@@ -13,48 +13,48 @@ internal sealed class AboutForm : Form
         MaximizeBox = false;
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterParent;
-        ClientSize = new Size(440, 320);
+        ClientSize = new Size(460, 340);
         Font = UiTheme.BodyFont;
         BackColor = UiTheme.AppBackground;
         ShowInTaskbar = false;
+        Padding = new Padding(20);
 
         var version = Assembly.GetExecutingAssembly()
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
             ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString()
-            ?? "1.2.0";
+            ?? "1.5.0";
 
         var title = new Label
         {
             Text = "ZoneShift",
             Font = UiTheme.TitleFont,
             ForeColor = UiTheme.Accent,
-            Location = new Point(20, 16),
+            Location = new Point(20, 18),
             AutoSize = true,
-            BackColor = Color.Transparent
+            BackColor = UiTheme.AppBackground
         };
 
         var body = new TextBox
         {
             Multiline = true,
             ReadOnly = true,
-            BorderStyle = BorderStyle.None,
-            BackColor = UiTheme.CardBackground,
-            Location = new Point(20, 56),
-            Size = new Size(400, 180),
+            BorderStyle = BorderStyle.FixedSingle,
+            BackColor = UiTheme.InputBack,
+            ForeColor = UiTheme.TextPrimary,
+            Location = new Point(20, 58),
+            Size = new Size(420, 200),
             Text = AppLog.BuildDiagnosticsSummary(AppSettings.SettingsPath, version),
-            ScrollBars = ScrollBars.Vertical
+            ScrollBars = ScrollBars.Vertical,
+            Padding = new Padding(6)
         };
 
         var openSettings = new Button
         {
             Text = "Open settings folder",
-            Location = new Point(20, 250),
-            Size = new Size(150, 30),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = UiTheme.AccentSoft,
-            ForeColor = UiTheme.Accent
+            Location = new Point(20, 276),
+            Size = new Size(156, 32)
         };
-        openSettings.FlatAppearance.BorderSize = 0;
+        UiTheme.StyleSecondaryButton(openSettings);
         openSettings.Click += (_, _) =>
         {
             try
@@ -75,13 +75,10 @@ internal sealed class AboutForm : Form
         var openLogs = new Button
         {
             Text = "Open logs folder",
-            Location = new Point(180, 250),
-            Size = new Size(130, 30),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = UiTheme.AccentSoft,
-            ForeColor = UiTheme.Accent
+            Location = new Point(188, 276),
+            Size = new Size(140, 32)
         };
-        openLogs.FlatAppearance.BorderSize = 0;
+        UiTheme.StyleSecondaryButton(openLogs);
         openLogs.Click += (_, _) =>
         {
             try
@@ -103,9 +100,10 @@ internal sealed class AboutForm : Form
         {
             Text = "Close",
             DialogResult = DialogResult.OK,
-            Location = new Point(330, 250),
-            Size = new Size(90, 30)
+            Location = new Point(344, 276),
+            Size = new Size(96, 32)
         };
+        UiTheme.StylePrimaryButton(close);
         AcceptButton = close;
 
         Controls.Add(title);

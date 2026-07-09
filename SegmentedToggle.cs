@@ -17,8 +17,9 @@ internal sealed class SegmentedToggle : Panel
     public SegmentedToggle(string leftText, string rightText)
     {
         DoubleBuffered = true;
-        BackColor = UiTheme.SegmentIdle;
-        BorderStyle = BorderStyle.FixedSingle;
+        BackColor = UiTheme.CardFace;
+        BorderStyle = BorderStyle.None;
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
 
         _left = MakeSegment(leftText);
         _right = MakeSegment(rightText);
@@ -32,6 +33,34 @@ internal sealed class SegmentedToggle : Panel
         _ready = true;
         LayoutSegments();
         ApplyVisuals();
+
+        UiTheme.ThemeChanged += OnThemeChanged;
+        Disposed += (_, _) => UiTheme.ThemeChanged -= OnThemeChanged;
+    }
+
+    private void OnThemeChanged()
+    {
+        if (IsDisposed) return;
+        BackColor = UiTheme.CardFace;
+        ApplyVisuals();
+        Invalidate();
+    }
+
+    protected override void OnPaintBackground(PaintEventArgs e)
+    {
+        UiPaint.FillGutter(e.Graphics, ClientRectangle, BackColor);
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        var r = ClientRectangle;
+        UiPaint.FillGutter(g, r, BackColor);
+        UiPaint.EnableQuality(g);
+        using (var bg = new SolidBrush(UiTheme.SegmentIdle))
+            UiPaint.FillRoundRect(g, bg, r, 6);
+        using (var edge = new Pen(UiTheme.CardBorder, 1f))
+            UiPaint.DrawRoundRect(g, edge, r, 6);
     }
 
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
@@ -65,8 +94,9 @@ internal sealed class SegmentedToggle : Panel
         SelectionChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private Button MakeSegment(string text) =>
-        new()
+    private Button MakeSegment(string text)
+    {
+        var btn = new Button
         {
             Text = text,
             FlatStyle = FlatStyle.Flat,
@@ -75,8 +105,13 @@ internal sealed class SegmentedToggle : Panel
             TabStop = false,
             AutoSize = false,
             TextAlign = ContentAlignment.MiddleCenter,
-            Padding = new Padding(2, 0, 2, 0)
+            Padding = new Padding(2, 0, 2, 0),
+            UseVisualStyleBackColor = false
         };
+        btn.FlatAppearance.BorderSize = 0;
+        btn.FlatAppearance.BorderColor = UiTheme.SegmentIdle;
+        return btn;
+    }
 
     private void LayoutSegments()
     {
@@ -84,8 +119,8 @@ internal sealed class SegmentedToggle : Panel
             return;
 
         var half = Width / 2;
-        _left.SetBounds(1, 1, half - 2, Height - 2);
-        _right.SetBounds(half, 1, half - 2, Height - 2);
+        _left.SetBounds(3, 3, half - 5, Height - 6);
+        _right.SetBounds(half + 1, 3, half - 5, Height - 6);
         _left.FlatAppearance.BorderSize = 0;
         _right.FlatAppearance.BorderSize = 0;
     }
@@ -101,14 +136,18 @@ internal sealed class SegmentedToggle : Panel
 
     private static void Style(Button btn, bool active)
     {
-        btn.BackColor = active ? UiTheme.SegmentActive : UiTheme.SegmentIdle;
-        btn.ForeColor = active ? Color.White : UiTheme.TextSecondary;
+        var back = active ? UiTheme.SegmentActive : UiTheme.SegmentIdle;
+        btn.BackColor = back;
+        btn.ForeColor = active ? UiTheme.SegmentActiveText : UiTheme.SegmentIdleText;
+        btn.FlatAppearance.BorderSize = 0;
+        btn.FlatAppearance.BorderColor = back;
         btn.FlatAppearance.MouseOverBackColor = active
-            ? Color.FromArgb(67, 56, 202)
-            : Color.FromArgb(226, 232, 240);
+            ? UiTheme.AccentHover
+            : UiTheme.SegmentIdleHover;
         btn.FlatAppearance.MouseDownBackColor = active
-            ? Color.FromArgb(55, 48, 163)
-            : Color.FromArgb(203, 213, 225);
+            ? UiTheme.AccentPressed
+            : UiTheme.SegmentIdle;
+        btn.UseVisualStyleBackColor = false;
     }
 
     protected override void OnResize(EventArgs eventargs)

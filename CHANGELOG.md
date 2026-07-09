@@ -2,6 +2,17 @@
 
 All notable changes to ZoneShift are documented here.
 
+## 1.6.0
+
+### UI
+- Newsroom **clock wall** layout with custom LED modules
+- **Theme picker** (View > Theme): Studio, Classic, Neon Pulse
+- Contrast and spacing polish across themes
+- About / Tips / Check updates in Help menu and footer
+
+### Process
+- Theme unit tests
+
 ## 1.5.0
 
 ### Polish

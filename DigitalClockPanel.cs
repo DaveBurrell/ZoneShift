@@ -3,69 +3,69 @@ using System.ComponentModel;
 namespace TimezoneConverter;
 
 /// <summary>
-/// Simple digital clock readout - solid panel, no region clipping (avoids text being cut off).
+/// Hero / module LED clock (wraps custom-painted <see cref="LedClockDisplay"/>).
 /// </summary>
 internal sealed class DigitalClockPanel : Panel
 {
-    private readonly Label _timeLabel;
-    private readonly Label? _captionLabel;
+    private readonly LedClockDisplay _led;
 
     public DigitalClockPanel(bool large = false)
     {
         DoubleBuffered = true;
-        BackColor = UiTheme.ClockBack;
-        Padding = large ? new Padding(8, 6, 8, 6) : new Padding(6, 2, 6, 2);
+        BackColor = UiTheme.CardFace;
+        BorderStyle = BorderStyle.None;
+        Padding = Padding.Empty;
 
-        _timeLabel = new Label
+        _led = new LedClockDisplay(large)
         {
             Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleCenter,
-            Font = large ? UiTheme.ClockLargeFont : UiTheme.ClockRowFont,
-            ForeColor = UiTheme.ClockFore,
-            BackColor = UiTheme.ClockBack,
-            Text = "--:--",
-            AutoEllipsis = true
+            ZoneText = large ? "LOCAL" : "",
+            BlinkColons = large,
+            GutterColor = UiTheme.CardFace
         };
+        Controls.Add(_led);
 
-        if (large)
-        {
-            _captionLabel = new Label
-            {
-                Dock = DockStyle.Bottom,
-                Height = 20,
-                TextAlign = ContentAlignment.TopCenter,
-                Font = UiTheme.CaptionFont,
-                ForeColor = UiTheme.TextMuted,
-                BackColor = UiTheme.ClockBack,
-                Text = "",
-                AutoEllipsis = true
-            };
-            Controls.Add(_timeLabel);
-            Controls.Add(_captionLabel);
-        }
-        else
-        {
-            Controls.Add(_timeLabel);
-        }
+        UiTheme.ThemeChanged += OnThemeChanged;
+        Disposed += (_, _) => UiTheme.ThemeChanged -= OnThemeChanged;
+    }
+
+    private void OnThemeChanged()
+    {
+        if (IsDisposed) return;
+        BackColor = UiTheme.CardFace;
+        _led.GutterColor = UiTheme.CardFace;
+        Invalidate(true);
     }
 
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     [Browsable(false)]
     public string TimeText
     {
-        get => _timeLabel.Text;
-        set => _timeLabel.Text = value;
+        get => _led.TimeText;
+        set => _led.TimeText = value;
     }
 
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     [Browsable(false)]
     public string CaptionText
     {
-        get => _captionLabel?.Text ?? string.Empty;
-        set
-        {
-            if (_captionLabel is not null)
-                _captionLabel.Text = value;
-        }
+        get => _led.CaptionText;
+        set => _led.CaptionText = value;
+    }
+
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    [Browsable(false)]
+    public string ZoneText
+    {
+        get => _led.ZoneText;
+        set => _led.ZoneText = value;
+    }
+
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    [Browsable(false)]
+    public bool BlinkColons
+    {
+        get => _led.BlinkColons;
+        set => _led.BlinkColons = value;
     }
 }

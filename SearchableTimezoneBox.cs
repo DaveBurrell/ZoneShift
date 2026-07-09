@@ -21,6 +21,9 @@ internal sealed class SearchableTimezoneBox : ComboBox
         FlatStyle = FlatStyle.Flat;
         ItemHeight = 22;
         AutoCompleteMode = AutoCompleteMode.None;
+        // Light text on dark field — avoids default black-on-dark
+        BackColor = UiTheme.InputBack;
+        ForeColor = UiTheme.TextPrimary;
 
         TextUpdate += OnTextUpdate;
         DropDown += (_, _) => ApplyFilter(_filter, keepText: true);
@@ -249,9 +252,12 @@ internal sealed class SearchableTimezoneBox : ComboBox
         }
 
         var selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
-        var fore = selected ? SystemColors.HighlightText : ForeColor;
-        var text = FormatOption(opt);
+        var back = selected ? UiTheme.SegmentActive : UiTheme.InputBack;
+        var fore = selected ? UiTheme.TextOnAccent : UiTheme.TextPrimary;
+        using (var b = new SolidBrush(back))
+            e.Graphics.FillRectangle(b, e.Bounds);
 
+        var text = FormatOption(opt);
         TextRenderer.DrawText(
             e.Graphics,
             text,
@@ -259,7 +265,5 @@ internal sealed class SearchableTimezoneBox : ComboBox
             e.Bounds,
             fore,
             TextFormatFlags.EndEllipsis | TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPrefix);
-
-        e.DrawFocusRectangle();
     }
 }

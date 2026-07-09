@@ -23,6 +23,8 @@ internal sealed class TimeEntryCombo : ComboBox
         FlatStyle = FlatStyle.Flat;
         AutoCompleteMode = AutoCompleteMode.SuggestAppend;
         AutoCompleteSource = AutoCompleteSource.ListItems;
+        BackColor = UiTheme.InputBack;
+        ForeColor = UiTheme.TextPrimary;
 
         // Selecting a 30-minute preset from the list
         SelectionChangeCommitted += (_, _) =>

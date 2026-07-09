@@ -33,6 +33,9 @@ public sealed class AppSettings
     public bool LiveMode { get; set; } = true;
     public bool HasSeenOnboarding { get; set; }
 
+    /// <summary>Studio | Classic | NeonPulse (see <see cref="AppThemeId"/>).</summary>
+    public string Theme { get; set; } = nameof(AppThemeId.Studio);
+
     public int WindowX { get; set; } = -1;
     public int WindowY { get; set; } = -1;
     public int WindowWidth { get; set; }

@@ -51,8 +51,8 @@ powershell -ExecutionPolicy Bypass -File .\pack-installer.ps1
 
 Output (dual architecture):
 
-- `dist\ZoneShift-Setup-1.5.0-x64.exe`
-- `dist\ZoneShift-Setup-1.5.0-arm64.exe`
+- `dist\ZoneShift-Setup-1.6.0-x64.exe`
+- `dist\ZoneShift-Setup-1.6.0-arm64.exe`
 
 The installer:
 - Per-user install under `%LocalAppData%\Programs\ZoneShift` (no admin required)
@@ -60,7 +60,15 @@ The installer:
 - **Start Menu** entry and uninstaller
 - Self-contained (~60+ MB setup; no .NET install needed on the target PC)
 
-Tag releases (`v1.5.0`) also build installers via GitHub Actions (`.github/workflows/release.yml`).
+Tag releases (`v1.6.0`) also build installers via GitHub Actions (`.github/workflows/release.yml`).
+
+### Themes
+
+**View → Theme**:
+- **Studio** — dark newsroom wall, amber LEDs
+- **Classic** — original light UI, indigo accents
+- **Neon Pulse** — cyberpunk cyan clocks, magenta accents
+
 
 Requires [Inno Setup 6](https://jrsoftware.org/isinfo.php) to rebuild (`winget install JRSoftware.InnoSetup`).
 
