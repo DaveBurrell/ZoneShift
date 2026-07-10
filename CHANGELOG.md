@@ -2,6 +2,23 @@
 
 All notable changes to ZoneShift are documented here.
 
+## 1.7.1
+
+### Fix
+- **The saved theme is now applied before any control is built.** Controls declared as fields are constructed before a constructor body runs, so they cached colors from the default palette regardless of which theme was saved. On the light themes this left dark wedges at the segmented-toggle corners and around the hero clock's bezel
+- **The date field is themed.** `DateTimePicker` is a native control with no dark mode — unaffected by `Application.SetColorMode` and by `SetWindowTheme` — so it rendered as a white box on Studio and Night Ops. Replaced with `ThemedDateBox`, which paints from the palette and keeps typing, arrow-key stepping, and a calendar drop-down
+- **Check box glyphs are painted from the palette.** WinForms draws them from `SystemColors`, which rendered as white boxes on the dark themes. Their tick now uses the theme's accent rather than Windows' blue
+- **The timezone field no longer opens showing a full-width selection block**
+
+### Themes
+- Native chrome now follows the theme: scroll bars, menus, dialogs, combo borders, and the window title bar. Switching between a light and a dark theme re-applies it live, with no restart
+- The `TIME` and `DATE` fields share a muted surface while live mode disables them, instead of one looking editable
+
+### Internal
+- `Program` resolves the theme and color mode before constructing `MainForm`; `MainForm` now takes its `AppSettings`
+- `SystemTheming` centralises the process color mode and the title-bar attribute
+- Tests reach internal UI helpers via `InternalsVisibleTo` rather than widening the public API
+
 ## 1.7.0
 
 ### Themes

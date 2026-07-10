@@ -153,3 +153,8 @@ Screenshotting all four themes surfaced bugs that no assertion would have caught
 WinForms draws a combo box's border from system colors rather than the control's palette, so the
 timezone dropdowns keep a light 1px outline on the dark themes. Fixing it requires owner-drawing
 the combo frame, which is out of scope for this change.
+
+> **Resolved in 1.7.1.** `Application.SetColorMode`, keyed to the active palette's `IsDark`, moves
+> `SystemColors` into the right band and the combo border follows. The same call fixes scroll bars,
+> menus, and dialogs. It does *not* reach `DateTimePicker` or the check box glyph — both were
+> replaced with palette-painted controls. See the 1.7.1 changelog entry.

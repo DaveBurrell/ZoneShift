@@ -19,7 +19,15 @@ static class Program
             // PerMonitorV2 + AutoScaleMode.Dpi crushed the absolute layout.
             Application.SetHighDpiMode(HighDpiMode.DpiUnawareGdiScaled);
 
-            AppLog.Info($"ZoneShift starting (arch={UpdateChecker.CurrentArchitectureLabel}).");
+            // Resolve the theme here, not in MainForm. Field initializers run before a
+            // constructor body, so any control MainForm creates as a field would otherwise cache
+            // colors from the default palette rather than the saved one. The color mode likewise
+            // has to be set before the first window exists.
+            var settings = AppSettings.Load();
+            UiTheme.SetTheme(settings.Theme, raiseEvent: false);
+            SystemTheming.ApplyColorMode(UiTheme.IsDark);
+
+            AppLog.Info($"ZoneShift starting (arch={UpdateChecker.CurrentArchitectureLabel}, theme={UiTheme.DisplayName}).");
             Application.ApplicationExit += (_, _) =>
             {
                 AppLog.Info("ZoneShift exiting.");
@@ -43,7 +51,7 @@ static class Program
                     AppLog.Error($"Unhandled non-Exception: {e.ExceptionObject}");
             };
 
-            Application.Run(new MainForm());
+            Application.Run(new MainForm(settings));
         }
         catch (Exception ex)
         {

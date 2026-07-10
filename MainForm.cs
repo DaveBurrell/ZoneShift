@@ -1,11 +1,11 @@
-using TimezoneConverter.Services;
+﻿using TimezoneConverter.Services;
 
 namespace TimezoneConverter;
 
 public sealed class MainForm : Form
 {
     private readonly TimeZoneInfo _localTimezone = TimeZoneInfo.Local;
-    private readonly AppSettings _settings = AppSettings.Load();
+    private readonly AppSettings _settings;
     private readonly System.Windows.Forms.Timer _liveTimer = new();
 
     private readonly Label _localTimezoneLabel = new();
@@ -17,15 +17,15 @@ public sealed class MainForm : Form
     private readonly InputHostPanel _reverseZoneRow = new();
     private Panel _sourceWrap = null!;
     private readonly SearchableTimezoneBox _reverseSourceTimezone = new();
-    private readonly DateTimePicker _datePicker = new();
+    private readonly ThemedDateBox _datePicker = new();
     private readonly TimeEntryCombo _timeEntry = new();
-    private readonly CheckBox _liveModeCheck = new();
+    private readonly ThemedCheckBox _liveModeCheck = new();
     private readonly Button _useNowButton = new();
     private readonly Button _copyButton = new();
     private readonly SegmentedToggle _formatToggle = new("12-hour", "24-hour");
     private readonly SegmentedToggle _directionToggle = new("From my zone", "To my zone");
-    private readonly CheckBox _overlayCheck = new();
-    private readonly CheckBox _closeToTrayCheck = new();
+    private readonly ThemedCheckBox _overlayCheck = new();
+    private readonly ThemedCheckBox _closeToTrayCheck = new();
     private readonly DigitalClockPanel _primaryClock = new(large: true);
     private readonly Label _statusLabel = new();
     private readonly Button _addTimezoneButton = new();
@@ -82,10 +82,14 @@ public sealed class MainForm : Form
     private bool Use24Hour => _formatToggle.RightSelected;
     private bool ConvertToLocal => _directionToggle.RightSelected;
 
-    public MainForm()
+    /// <summary>
+    /// The caller must have applied the theme and color mode already — see <see cref="Program"/>.
+    /// Controls declared as fields are constructed before this body runs and cache palette colors
+    /// as they go, so a theme applied here would arrive too late for them.
+    /// </summary>
+    public MainForm(AppSettings settings)
     {
-        // Apply saved theme before any control paints
-        UiTheme.SetTheme(_settings.Theme, raiseEvent: false);
+        _settings = settings;
 
         Text = "ZoneShift";
         StartPosition = FormStartPosition.CenterScreen;
@@ -119,6 +123,8 @@ public sealed class MainForm : Form
 
         Shown += (_, _) =>
         {
+            SystemTheming.ApplyTitleBar(Handle, UiTheme.IsDark);
+
             // Enforce readable size if saved bounds are missing/corrupt
             if (Width < LayoutMetrics.MinWidth - 40 || Height < LayoutMetrics.MinHeight - 40)
                 ClientSize = new Size(LayoutMetrics.ClientWidth, LayoutMetrics.ClientHeight);
@@ -129,6 +135,10 @@ public sealed class MainForm : Form
             RebuildTargetListUi();
             RefreshFavoriteVisuals();
             RefreshDisplays();
+
+            // The focused combo selects its whole text, which paints as a full-width highlight
+            // block. Collapse it so the field reads as a value, not a selection.
+            _reverseSourceTimezone.SelectionLength = 0;
             // Do NOT PersistSettings here — combos may not be fully selected yet and
             // would overwrite good on-disk zone lists with incomplete UI state.
             // Window bounds only (non-destructive):
@@ -467,16 +477,14 @@ public sealed class MainForm : Form
         _overlayCheck.Font = new Font("Segoe UI Semibold", 8.5f);
         _overlayCheck.ForeColor = UiTheme.TextPrimary;
         _overlayCheck.BackColor = cardFace;
-        _overlayCheck.FlatStyle = FlatStyle.Flat;
-        _overlayCheck.AutoSize = true;
+        _overlayCheck.Size = _overlayCheck.MeasureNaturalSize();
         _overlayCheck.CheckedChanged += OnOverlayCheckChanged;
 
         _closeToTrayCheck.Text = "Close to tray";
         _closeToTrayCheck.Font = new Font("Segoe UI Semibold", 8.5f);
         _closeToTrayCheck.ForeColor = UiTheme.TextPrimary;
         _closeToTrayCheck.BackColor = cardFace;
-        _closeToTrayCheck.FlatStyle = FlatStyle.Flat;
-        _closeToTrayCheck.AutoSize = true;
+        _closeToTrayCheck.Size = _closeToTrayCheck.MeasureNaturalSize();
         _closeToTrayCheck.CheckedChanged += (_, _) =>
         {
             if (_suppressEvents) return;
@@ -544,7 +552,8 @@ public sealed class MainForm : Form
         _clockHost.Controls.Add(_primaryClock);
 
         // Absolute layout — coordinates are relative to leftHost (already inset by sourceCard.Padding)
-        _leftHost = new Panel
+        // InputHostPanel: themes the native edit field of the TIME combo it hosts.
+        _leftHost = new InputHostPanel
         {
             Dock = DockStyle.Fill,
             BackColor = cardFace,
@@ -575,8 +584,7 @@ public sealed class MainForm : Form
         _liveModeCheck.Font = new Font("Segoe UI Semibold", 8.5f);
         _liveModeCheck.ForeColor = UiTheme.TextPrimary;
         _liveModeCheck.BackColor = cardFace;
-        _liveModeCheck.FlatStyle = FlatStyle.Flat;
-        _liveModeCheck.AutoSize = true;
+        _liveModeCheck.Size = _liveModeCheck.MeasureNaturalSize();
         _liveModeCheck.Checked = true;
         _liveModeCheck.CheckedChanged += OnLiveModeChanged;
 
@@ -588,7 +596,6 @@ public sealed class MainForm : Form
         _useNowButton.Visible = false;
 
         StyleCaption(_dateFieldCaption, "DATE");
-        _datePicker.Format = DateTimePickerFormat.Short;
         _datePicker.Size = new Size(148, 26);
         _datePicker.ValueChanged += OnInputChanged;
 
@@ -762,16 +769,16 @@ public sealed class MainForm : Form
 
         if (showOverlay)
         {
-            _overlayCheck.Location = new Point(optsLeft, padY + (h - _overlayCheck.PreferredSize.Height) / 2);
+            _overlayCheck.Location = new Point(optsLeft, padY + (h - _overlayCheck.MeasureNaturalSize().Height) / 2);
 
-            var trayX = optsLeft + _overlayCheck.PreferredSize.Width + 14;
+            var trayX = optsLeft + _overlayCheck.MeasureNaturalSize().Width + 14;
             if (showTray && trayX + 100 > optsRight)
                 showTray = false;
 
             if (showTray)
                 _closeToTrayCheck.Location = new Point(
                     trayX,
-                    padY + (h - _closeToTrayCheck.PreferredSize.Height) / 2);
+                    padY + (h - _closeToTrayCheck.MeasureNaturalSize().Height) / 2);
         }
         else
         {
@@ -787,13 +794,32 @@ public sealed class MainForm : Form
         if (UiTheme.CurrentId == id)
             return;
 
+        var wasDark = UiTheme.IsDark;
         UiTheme.SetTheme(id, raiseEvent: true);
+
+        // Native controls only follow the process color mode, so they need re-theming when the
+        // switch crosses light <-> dark. Staying within a lightness band leaves them correct.
+        if (UiTheme.IsDark != wasDark)
+            ApplySystemColorMode();
+
         _settings.Theme = id.ToString();
         ApplyChromeTheme();
         PersistSettings();
         RefreshDisplays();
         _statusLabel.Text = $"Theme: {UiTheme.DisplayName}";
         _statusLabel.ForeColor = UiTheme.Success;
+    }
+
+    /// <summary>
+    /// Re-applies the process color mode and repaints the pieces Windows owns.
+    /// </summary>
+    private void ApplySystemColorMode()
+    {
+        SystemTheming.ApplyColorMode(UiTheme.IsDark);
+        SystemTheming.ApplyTitleBar(Handle, UiTheme.IsDark);
+
+        // Everything else picks up the new SystemColors on the next paint.
+        Invalidate(true);
     }
 
     private void SyncThemeMenuChecks()

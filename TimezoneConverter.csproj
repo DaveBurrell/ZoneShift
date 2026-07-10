@@ -12,7 +12,7 @@
     <Product>ZoneShift</Product>
     <AssemblyTitle>ZoneShift</AssemblyTitle>
     <Description>ZoneShift - convert times across timezones with live digital clocks</Description>
-    <Version>1.7.0</Version>
+    <Version>1.7.1</Version>
     <Company>ZoneShift</Company>
     <Copyright>Copyright (c) ZoneShift</Copyright>
     <!-- Keep in sync with Program.cs SetHighDpiMode - PerMonitorV2 breaks absolute layout -->
@@ -34,6 +34,11 @@
     <None Include="tools\**\*" />
     <Compile Remove="tests\**\*" />
     <None Include="tests\**\*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Lets tests reach internal UI helpers without widening the public surface. -->
+    <InternalsVisibleTo Include="ZoneShift.Tests" />
   </ItemGroup>
 
 </Project>
