@@ -14,7 +14,7 @@ public sealed class MainForm : Form
     private readonly Label _inputZoneCaption = new();
     private readonly Label _dateFieldCaption = new();
     private readonly Label _timeFieldCaption = new();
-    private readonly Panel _reverseZoneRow = new();
+    private readonly InputHostPanel _reverseZoneRow = new();
     private Panel _sourceWrap = null!;
     private readonly SearchableTimezoneBox _reverseSourceTimezone = new();
     private readonly DateTimePicker _datePicker = new();
@@ -378,16 +378,13 @@ public sealed class MainForm : Form
             {
                 Tag = id,
                 Checked = id == UiTheme.CurrentId,
-                CheckOnClick = false
+                CheckOnClick = false,
+                ToolTipText = palette.Description
             };
             item.Click += (_, _) => SelectTheme(id);
             _themeMenuItems.Add(item);
             themeMenu.DropDownItems.Add(item);
         }
-        // Short descriptions under the submenu (tooltips via text suffix on first open)
-        themeMenu.DropDownItems[0].ToolTipText = "Newsroom amber LEDs on dark studio wall";
-        themeMenu.DropDownItems[1].ToolTipText = "Original light UI with indigo accents";
-        themeMenu.DropDownItems[2].ToolTipText = "Cyberpunk cyan clocks and magenta neon";
         viewMenu.DropDownItems.Add(themeMenu);
         _mainMenu.Items.Add(viewMenu);
 
@@ -414,37 +411,38 @@ public sealed class MainForm : Form
             Dock = DockStyle.Top,
             Height = LayoutMetrics.HeaderH
         };
+        // Transparent, not HeaderBack: StudioHeader paints a HeaderTop -> HeaderBottom gradient, and
+        // an opaque label can only match it on one scanline — elsewhere it stamps a visible rectangle.
         _brandTitle = new Label
         {
             Text = "ZONESHIFT",
             Font = new Font("Segoe UI Semibold", 15f),
-            ForeColor = UiTheme.ClockFore,
-            BackColor = UiTheme.HeaderBack,
+            ForeColor = UiTheme.BrandText,
+            BackColor = Color.Transparent,
             AutoSize = false,
-            Location = new Point(LayoutMetrics.HeaderPadX, 10),
-            Size = new Size(240, 24)
+            Location = new Point(LayoutMetrics.HeaderPadX, LayoutMetrics.BrandTitleTop),
+            Size = new Size(LayoutMetrics.BrandTitleW, LayoutMetrics.BrandTitleH)
         };
         _brandSubtitle = new Label
         {
             Text = UiTheme.Tagline,
             Font = new Font("Segoe UI", 8f),
             ForeColor = UiTheme.TextSecondary,
-            BackColor = UiTheme.HeaderBack,
+            BackColor = Color.Transparent,
             AutoSize = false,
-            Location = new Point(LayoutMetrics.HeaderPadX + 2, 34),
-            Size = new Size(440, 14)
+            Location = new Point(LayoutMetrics.HeaderPadX + 2, LayoutMetrics.BrandSubtitleTop),
+            Size = new Size(LayoutMetrics.BrandSubtitleW, LayoutMetrics.BrandSubtitleH)
         };
         _liveBadge = new LiveBadgeControl
         {
-            Location = new Point(680, 16),
-            Size = new Size(82, 24),
+            Size = new Size(LayoutMetrics.LiveBadgeW, LayoutMetrics.LiveBadgeH),
             IsLive = true
         };
         header.Controls.Add(_brandTitle);
         header.Controls.Add(_brandSubtitle);
         header.Controls.Add(_liveBadge);
-        header.Resize += (_, _) =>
-            _liveBadge.Left = Math.Max(420, header.ClientSize.Width - _liveBadge.Width - LayoutMetrics.HeaderPadX);
+        header.Resize += (_, _) => LayoutHeader(header);
+        LayoutHeader(header);
         Controls.Add(header);
 
         // --- Control toolbar ---
@@ -555,7 +553,7 @@ public sealed class MainForm : Form
 
         _sourceSectionTitle.Text = "Master clock";
         _sourceSectionTitle.Font = UiTheme.SectionFont;
-        _sourceSectionTitle.ForeColor = UiTheme.Accent;
+        _sourceSectionTitle.ForeColor = UiTheme.SectionHeading;
         _sourceSectionTitle.BackColor = cardFace;
         _sourceSectionTitle.AutoSize = false;
 
@@ -648,7 +646,7 @@ public sealed class MainForm : Form
         {
             Text = "WORLD CLOCK WALL",
             Font = UiTheme.SectionFont,
-            ForeColor = UiTheme.ClockFore,
+            ForeColor = UiTheme.SectionHeading,
             BackColor = cardFace,
             AutoSize = false,
             Dock = DockStyle.Left,
@@ -716,6 +714,21 @@ public sealed class MainForm : Form
     }
 
     /// <summary>
+    /// Brand strip: wordmark pinned left, live badge pinned right and vertically centered.
+    /// Never lets the badge slide left of the wordmark on a narrow window.
+    /// </summary>
+    private void LayoutHeader(Control header)
+    {
+        if (_liveBadge is null || header.ClientSize.Width < 40)
+            return;
+
+        var floor = LayoutMetrics.HeaderPadX + LayoutMetrics.BrandTitleW;
+        var pinnedRight = header.ClientSize.Width - _liveBadge.Width - LayoutMetrics.HeaderPadX;
+        _liveBadge.Left = Math.Max(floor, pinnedRight);
+        _liveBadge.Top = Math.Max(0, (header.ClientSize.Height - _liveBadge.Height) / 2);
+    }
+
+    /// <summary>
     /// Responsive toolbar: toggles left, options center-left, Copy pinned right.
     /// Never lets checkboxes collide with Copy.
     /// </summary>
@@ -741,23 +754,32 @@ public sealed class MainForm : Form
         var optsRight = _copyButton.Left - gap;
         var optsSpace = optsRight - optsLeft;
 
-        _overlayCheck.Visible = optsSpace >= 70;
-        _closeToTrayCheck.Visible = optsSpace >= 200;
+        // Track intent in locals: Control.Visible reads back the *effective* visibility, which is
+        // false for every child while the form is still being built. Branching on it here would
+        // skip the Location assignments and strand both checkboxes at (0, 0).
+        var showOverlay = optsSpace >= 70;
+        var showTray = optsSpace >= 200;
 
-        if (_overlayCheck.Visible)
+        if (showOverlay)
         {
             _overlayCheck.Location = new Point(optsLeft, padY + (h - _overlayCheck.PreferredSize.Height) / 2);
-            if (_closeToTrayCheck.Visible)
-            {
-                var trayX = _overlayCheck.Right + 14;
-                if (trayX + 100 > optsRight)
-                    _closeToTrayCheck.Visible = false;
-                else
-                    _closeToTrayCheck.Location = new Point(
-                        trayX,
-                        padY + (h - _closeToTrayCheck.PreferredSize.Height) / 2);
-            }
+
+            var trayX = optsLeft + _overlayCheck.PreferredSize.Width + 14;
+            if (showTray && trayX + 100 > optsRight)
+                showTray = false;
+
+            if (showTray)
+                _closeToTrayCheck.Location = new Point(
+                    trayX,
+                    padY + (h - _closeToTrayCheck.PreferredSize.Height) / 2);
         }
+        else
+        {
+            showTray = false;
+        }
+
+        _overlayCheck.Visible = showOverlay;
+        _closeToTrayCheck.Visible = showTray;
     }
 
     private void SelectTheme(AppThemeId id)
@@ -799,11 +821,11 @@ public sealed class MainForm : Form
             item.ForeColor = UiTheme.TextPrimary;
         SyncThemeMenuChecks();
 
-        _brandTitle.ForeColor = UiTheme.ClockFore;
-        _brandTitle.BackColor = UiTheme.HeaderBack;
+        _brandTitle.ForeColor = UiTheme.BrandText;
+        _brandTitle.BackColor = Color.Transparent;
         _brandSubtitle.Text = UiTheme.Tagline;
         _brandSubtitle.ForeColor = UiTheme.TextSecondary;
-        _brandSubtitle.BackColor = UiTheme.HeaderBack;
+        _brandSubtitle.BackColor = Color.Transparent;
 
         _footerBar.BackColor = UiTheme.FooterBack;
         _footerLinks.BackColor = UiTheme.FooterBack;
@@ -828,7 +850,7 @@ public sealed class MainForm : Form
         if (_wallFooter is not null) _wallFooter.BackColor = card;
         if (_targetListHost is not null) _targetListHost.BackColor = UiTheme.WallBack;
 
-        _sourceSectionTitle.ForeColor = UiTheme.Accent;
+        _sourceSectionTitle.ForeColor = UiTheme.SectionHeading;
         _sourceSectionTitle.BackColor = card;
         StyleCaption(_localZoneCaption, _localZoneCaption.Text);
         _localTimezoneLabel.ForeColor = UiTheme.TextPrimary;
@@ -840,7 +862,7 @@ public sealed class MainForm : Form
         StyleCaption(_dateFieldCaption, _dateFieldCaption.Text);
         StyleCaption(_timeFieldCaption, _timeFieldCaption.Text);
 
-        _wallSectionLabel.ForeColor = UiTheme.ClockFore;
+        _wallSectionLabel.ForeColor = UiTheme.SectionHeading;
         _wallSectionLabel.BackColor = card;
         _targetCountLabel.ForeColor = UiTheme.TextSecondary;
         _targetCountLabel.BackColor = card;

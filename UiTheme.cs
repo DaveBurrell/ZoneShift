@@ -16,19 +16,7 @@ internal static class UiTheme
 
     public static void SetTheme(AppThemeId id, bool raiseEvent = true)
     {
-        var next = ThemePalette.FromId(id);
-        if (ReferenceEquals(_current, next) && raiseEvent == false)
-        {
-            _current = next;
-            return;
-        }
-
-        if (_current.Id == next.Id && raiseEvent)
-        {
-            // still raise so first load can sync, but skip if identical and already applied
-        }
-
-        _current = next;
+        _current = ThemePalette.FromId(id);
         if (raiseEvent)
             ThemeChanged?.Invoke();
     }
@@ -59,6 +47,8 @@ internal static class UiTheme
     public static Color TextSecondary => _current.TextSecondary;
     public static Color TextMuted => _current.TextMuted;
     public static Color TextOnAccent => _current.TextOnAccent;
+    public static Color BrandText => _current.BrandText;
+    public static Color SectionHeading => _current.SectionHeading;
 
     // --- Accent ---
     public static Color Accent => _current.Accent;
@@ -69,7 +59,7 @@ internal static class UiTheme
     public static Color AccentSoftHover => _current.AccentSoftHover;
     public static Color AccentSoftPressed => _current.AccentSoftPressed;
 
-    // --- LED ---
+    // --- LED (glowing digits on GlassBack only — see ClockTextOnSurface for flat text) ---
     public static Color ClockBack => _current.ClockBack;
     public static Color ClockFore => _current.ClockFore;
     public static Color ClockCore => _current.ClockCore;
@@ -79,6 +69,7 @@ internal static class UiTheme
     public static Color BezelDark => _current.BezelDark;
     public static Color GlassBack => _current.GlassBack;
     public static Color LedCaption => _current.LedCaption;
+    public static Color ClockTextOnSurface => _current.ClockTextOnSurface;
 
     // --- Semantic ---
     public static Color Success => _current.Success;
@@ -106,14 +97,12 @@ internal static class UiTheme
     public static string Tagline => _current.Tagline;
     public static string DisplayName => _current.DisplayName;
 
-    public static Font TitleFont => new("Segoe UI Semibold", 16f);
-    public static Font SectionFont => new("Segoe UI Semibold", 10f);
-    public static Font BodyFont => new("Segoe UI", 9f);
-    public static Font CaptionFont => new("Segoe UI", 8.25f);
-    public static Font ClockHeroFont => new("Consolas", 28f, FontStyle.Bold);
-    public static Font ClockLargeFont => new("Consolas", 22f, FontStyle.Bold);
-    public static Font ClockRowFont => new("Consolas", 18f, FontStyle.Bold);
-    public static Font ZoneLabelFont => new("Segoe UI Semibold", 11f);
+    // Shared for the process lifetime. Callers assign these to Control.Font, which does not
+    // take ownership, so they must never be disposed.
+    public static Font TitleFont { get; } = new("Segoe UI Semibold", 16f);
+    public static Font SectionFont { get; } = new("Segoe UI Semibold", 10f);
+    public static Font BodyFont { get; } = new("Segoe UI", 9f);
+    public static Font CaptionFont { get; } = new("Segoe UI", 8.25f);
 
     public static void StylePrimaryButton(Button btn)
     {

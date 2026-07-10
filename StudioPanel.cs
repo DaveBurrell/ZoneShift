@@ -177,4 +177,13 @@ internal sealed class ClockTilePanel : Panel
     {
         UiPaint.PaintClockTile(e.Graphics, ClientRectangle, UiTheme.WallBack);
     }
+
+    /// <summary>Themes the native edit field of the timezone combo this tile hosts.</summary>
+    protected override void WndProc(ref Message m)
+    {
+        if (NativeInputTheming.TryHandle(ref m))
+            return;
+
+        base.WndProc(ref m);
+    }
 }

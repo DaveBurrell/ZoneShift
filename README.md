@@ -60,17 +60,27 @@ The installer:
 - **Start Menu** entry and uninstaller
 - Self-contained (~60+ MB setup; no .NET install needed on the target PC)
 
-Tag releases (`v1.6.3`) also build installers via GitHub Actions (`.github/workflows/release.yml`).
+Tag releases (`v1.7.0`) also build installers via GitHub Actions (`.github/workflows/release.yml`).
 
 Settings live in `%AppData%\ZoneShift\settings.json` and are kept across upgrades.
 
 
 ### Themes
 
-**View → Theme**:
-- **Studio** — dark newsroom wall, amber LEDs
-- **Classic** — original light UI, indigo accents
-- **Neon Pulse** — cyberpunk cyan clocks, magenta accents
+**View → Theme** — four built-in themes, two light and two dark:
+
+| Theme | Chrome | Accent | LED digits |
+| --- | --- | --- | --- |
+| **Studio** *(default)* | dark slate | amber | amber |
+| **Classic** | light cool-gray | indigo | emerald |
+| **Night Ops** | dark terminal | phosphor green | phosphor green |
+| **Meridian** | light warm-white | teal | coral |
+
+Every text-on-surface pairing in every theme is checked against WCAG 2.1 AA contrast minima by
+`ThemeContrastTests`, so a palette change that makes text hard to read fails the build.
+
+Themes retired in 1.7.0 are migrated on upgrade rather than reset — a saved **Neon Pulse**
+preference resolves to **Night Ops**, its closest surviving relative.
 
 
 Requires [Inno Setup 6](https://jrsoftware.org/isinfo.php) to rebuild (`winget install JRSoftware.InnoSetup`).

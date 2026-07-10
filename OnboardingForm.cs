@@ -45,7 +45,7 @@ internal sealed class OnboardingForm : Form
                 "   Enable the always-on-top mini view for meetings.\r\n" +
                 "   Drag the title bar; L locks, C is compact.\r\n\r\n" +
                 "Tip: Close can minimize to the tray (toolbar checkbox).\r\n" +
-                "Tip: View > Theme switches Studio, Classic, or Neon Pulse."
+                "Tip: View > Theme — Studio, Classic, Night Ops, or Meridian."
         };
 
         var ok = new Button

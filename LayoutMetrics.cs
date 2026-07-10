@@ -60,6 +60,14 @@ internal static class LayoutMetrics
     // Header brand
     public const int HeaderH = 58;
     public const int HeaderPadX = 22;
+    public const int BrandTitleTop = 10;
+    public const int BrandTitleW = 240;
+    public const int BrandTitleH = 24;
+    public const int BrandSubtitleTop = 34;
+    public const int BrandSubtitleW = 440;
+    public const int BrandSubtitleH = 14;
+    public const int LiveBadgeW = 82;
+    public const int LiveBadgeH = 24;
 
     // Clock wall tiles
     public const int TileW = 216;

@@ -122,7 +122,7 @@ internal sealed class OverlayForm : Form
         _localPanel.BackColor = UiTheme.CardFace;
         _localLabel.ForeColor = UiTheme.TextSecondary;
         _localLabel.BackColor = UiTheme.CardFace;
-        _localTimeLabel.ForeColor = UiTheme.ClockFore;
+        _localTimeLabel.ForeColor = UiTheme.ClockTextOnSurface;
         _localTimeLabel.BackColor = UiTheme.CardFace;
 
         _rowsHost.BackColor = UiTheme.AppBackground;
@@ -393,7 +393,7 @@ internal sealed class OverlayForm : Form
             _name.BackColor = UiTheme.CardFace;
             _meta.ForeColor = UiTheme.TextSecondary;
             _meta.BackColor = UiTheme.CardFace;
-            _time.ForeColor = UiTheme.ClockFore;
+            _time.ForeColor = UiTheme.ClockTextOnSurface;
             _time.BackColor = UiTheme.CardFace;
         }
     }

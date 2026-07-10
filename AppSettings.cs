@@ -33,7 +33,10 @@ public sealed class AppSettings
     public bool LiveMode { get; set; } = true;
     public bool HasSeenOnboarding { get; set; }
 
-    /// <summary>Studio | Classic | NeonPulse (see <see cref="AppThemeId"/>).</summary>
+    /// <summary>
+    /// Persisted by name, never by ordinal. Unknown and retired names resolve through
+    /// <see cref="ThemePalette.FromName"/> (see <see cref="AppThemeId"/>).
+    /// </summary>
     public string Theme { get; set; } = nameof(AppThemeId.Studio);
 
     public int WindowX { get; set; } = -1;
@@ -41,13 +44,21 @@ public sealed class AppSettings
     public int WindowWidth { get; set; }
     public int WindowHeight { get; set; }
 
+    /// <summary>
+    /// Overrides the settings location. Set by tests and by screenshot tooling so they can never
+    /// write over a real user's preferences. Unset in normal use.
+    /// </summary>
+    public const string DirectoryOverrideVariable = "ZONESHIFT_SETTINGS_DIR";
+
     public static string SettingsDirectory
     {
         get
         {
-            var dir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "ZoneShift");
+            var dir = Environment.GetEnvironmentVariable(DirectoryOverrideVariable) is { Length: > 0 } o
+                ? o
+                : Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    "ZoneShift");
             Directory.CreateDirectory(dir);
             return dir;
         }

@@ -236,24 +236,33 @@ internal sealed class LedClockDisplay : Control
         }
     }
 
+    private static readonly string[] MonoFamilies =
+        ["Consolas", "Cascadia Mono", "Lucida Console", "Courier New"];
+
+    /// <summary>
+    /// Resolves a monospace face. The digits and the blinking colon rely on a fixed advance
+    /// width, so an installed family is probed via <see cref="FontFamily"/> — the
+    /// <see cref="Font"/> constructor silently substitutes a proportional face instead of
+    /// throwing when the name is unknown.
+    /// </summary>
     private Font CreateTimeFont(Rectangle timeRect)
     {
-        float size;
-        if (_large)
-            size = Math.Clamp(timeRect.Height * 0.52f, 16f, 34f);
-        else
-            size = Math.Clamp(timeRect.Height * 0.58f, 11f, 20f);
+        var size = _large
+            ? Math.Clamp(timeRect.Height * 0.52f, 16f, 34f)
+            : Math.Clamp(timeRect.Height * 0.58f, 11f, 20f);
 
-        foreach (var family in new[] { "Consolas", "Cascadia Mono", "Lucida Console", "Courier New" })
+        foreach (var family in MonoFamilies)
         {
             try
             {
-                return new Font(family, size, FontStyle.Bold, GraphicsUnit.Point);
+                new FontFamily(family).Dispose();
             }
-            catch
+            catch (ArgumentException)
             {
-                // try next
+                continue;
             }
+
+            return new Font(family, size, FontStyle.Bold, GraphicsUnit.Point);
         }
 
         return new Font(FontFamily.GenericMonospace, size, FontStyle.Bold);
@@ -263,8 +272,11 @@ internal sealed class LedClockDisplay : Control
     {
         if (_colonOn || _blinkTimer is null || !_blinkTimer.Enabled)
             return text;
-        // Dim colon rather than remove (avoids layout jump + leftover marks)
-        return text;
+
+        // CreateTimeFont only ever resolves a monospace family, so ' ' and ':' share an
+        // advance width and blanking the colon cannot shift the digits. The ghost "88:88"
+        // mask still shows a dim colon underneath, which is how an unlit LED segment reads.
+        return text.Replace(':', ' ');
     }
 
     private static string BuildGhostMask(string timeText)

@@ -5,6 +5,10 @@ namespace TimezoneConverter;
 /// <summary>
 /// Type-to-filter timezone dropdown. Favorites appear first (starred in list text).
 /// Remembers a pending Windows ID so selection survives handle creation / refilters.
+/// <para>
+/// The native edit field is themed by the hosting container via <see cref="NativeInputTheming"/>,
+/// because a combo forwards WM_CTLCOLOREDIT to its parent rather than handling it itself.
+/// </para>
 /// </summary>
 internal sealed class SearchableTimezoneBox : ComboBox
 {
