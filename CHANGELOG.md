@@ -2,6 +2,25 @@
 
 All notable changes to ZoneShift are documented here.
 
+## 1.7.2
+
+### Fix
+- Fixed timezone dropdown crashes when filtering, clearing searches, and selecting or cancelling suggestions. The selected timezone now stays stable while the list updates.
+- Fixed time-entry parsing exceptions, malformed input acceptance, and preset changes during native selection events.
+- Fixed calendar date limits, Alt+Down navigation, and popup lifetime when choosing dates or closing the app.
+- Corrected daylight-saving offsets during repeated times and conversion through half-hour and larger clock changes.
+- Fixed favorite indicators after changing zones, live-mode settings persistence, and the update-check button remaining disabled after a completed check.
+
+### Performance
+- Cached timezone ordering and clock fonts; coalesced search updates and removed duplicate conversion/settings events.
+- Generate clipboard text on demand, skip hidden display work, and release timers and popup resources when their owners close.
+
+### Verification
+- Expanded the Windows test suite from 97 to 176 passing cases, including native dropdown typing, calendar interaction, input parsing, and main-form conversion checks.
+
+### Android source
+- Added the native Kotlin/Jetpack Compose Android project, its build wrapper, documentation, and tests. Windows installers remain the release downloads.
+
 ## 1.7.1
 
 ### Fix

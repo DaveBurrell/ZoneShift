@@ -104,10 +104,8 @@ internal sealed class TargetZoneRow
             Size = new Size(innerW, comboH)
         };
         Combo.SetOptions(options, favorites);
-        Combo.SelectedIndexChanged += onChanged;
-        Combo.SelectionChangeCommitted += onChanged;
-        Combo.SelectedIndexChanged += (_, _) => SyncZoneLabel();
-        Combo.SelectionChangeCommitted += (_, _) => SyncZoneLabel();
+        Combo.SelectedOptionChanged += (_, _) => SyncZoneLabel();
+        Combo.SelectedOptionChanged += onChanged;
 
         tile.Controls.Add(FavoriteButton);
         tile.Controls.Add(IndexBadge);
@@ -180,8 +178,6 @@ internal sealed class TargetZoneRow
     {
         var id = SelectedOption?.WindowsId;
         Combo.SetFavorites(favorites);
-        if (id is not null)
-            Combo.SelectWindowsId(id);
         SyncZoneLabel();
         RefreshFavoriteVisual(id is not null &&
             favorites.Any(f => string.Equals(f, id, StringComparison.OrdinalIgnoreCase)));

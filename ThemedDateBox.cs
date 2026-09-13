@@ -24,6 +24,15 @@ internal sealed class ThemedDateBox : Control
     private DateTime _value = DateTime.Today;
     private bool _syncingText;
     private bool _buttonHot;
+    private MonthCalendar? _calendar;
+    private ToolStripDropDown? _calendarDropDown;
+
+    private static DateTime MinimumDate => new(Math.Max(
+        DateTimePicker.MinimumDateTime.Date.Ticks,
+        CultureInfo.CurrentCulture.DateTimeFormat.Calendar.MinSupportedDateTime.Date.Ticks));
+    private static DateTime MaximumDate => new(Math.Min(
+        DateTimePicker.MaximumDateTime.Date.Ticks,
+        CultureInfo.CurrentCulture.DateTimeFormat.Calendar.MaxSupportedDateTime.Date.Ticks));
 
     public event EventHandler? ValueChanged;
 
@@ -62,7 +71,7 @@ internal sealed class ThemedDateBox : Control
         get => _value;
         set
         {
-            var next = value.Date;
+            var next = ClampDate(value.Date);
             if (_value.Date == next)
                 return;
 
@@ -96,6 +105,8 @@ internal sealed class ThemedDateBox : Control
 
     protected override void OnEnabledChanged(EventArgs e)
     {
+        if (!Enabled)
+            _calendarDropDown?.Close();
         _text.Enabled = Enabled;
         ApplyPalette();
         Invalidate();
@@ -167,6 +178,13 @@ internal sealed class ThemedDateBox : Control
 
     private void OnTextKeyDown(object? sender, KeyEventArgs e)
     {
+        if (e.KeyCode == Keys.F4 || (e.Alt && e.KeyCode == Keys.Down))
+        {
+            ShowCalendar();
+            e.SuppressKeyPress = true;
+            return;
+        }
+
         switch (e.KeyCode)
         {
             case Keys.Enter:
@@ -193,29 +211,27 @@ internal sealed class ThemedDateBox : Control
                 StepMonths(-1);
                 e.SuppressKeyPress = true;
                 break;
-            case Keys.F4:
-            case Keys.Down | Keys.Alt:
-                ShowCalendar();
-                e.SuppressKeyPress = true;
-                break;
         }
     }
 
     private void Step(int days)
     {
         var target = _value.Date;
-        if (days > 0 && target >= DateTime.MaxValue.Date.AddDays(-days)) return;
-        if (days < 0 && target <= DateTime.MinValue.Date.AddDays(-days)) return;
+        if (days > 0 && target > MaximumDate.AddDays(-days)) { Value = MaximumDate; return; }
+        if (days < 0 && target < MinimumDate.AddDays(-days)) { Value = MinimumDate; return; }
         Value = target.AddDays(days);
     }
 
     private void StepMonths(int months)
     {
         var target = _value.Date;
-        if (months > 0 && target >= DateTime.MaxValue.Date.AddMonths(-months)) return;
-        if (months < 0 && target <= DateTime.MinValue.Date.AddMonths(-months)) return;
+        if (months > 0 && target > MaximumDate.AddMonths(-months)) { Value = MaximumDate; return; }
+        if (months < 0 && target < MinimumDate.AddMonths(-months)) { Value = MinimumDate; return; }
         Value = target.AddMonths(months);
     }
+
+    private static DateTime ClampDate(DateTime value) =>
+        value < MinimumDate ? MinimumDate : value > MaximumDate ? MaximumDate : value;
 
     private Rectangle ButtonBounds =>
         new(Width - ButtonWidth - 1, 1, ButtonWidth, Math.Max(1, Height - 2));
@@ -259,29 +275,51 @@ internal sealed class ThemedDateBox : Control
     /// </summary>
     private void ShowCalendar()
     {
-        var calendar = new MonthCalendar
-        {
-            MaxSelectionCount = 1,
-            SelectionStart = _value.Date,
-            SelectionEnd = _value.Date
-        };
+        if (!Enabled || IsDisposed || Disposing)
+            return;
 
-        var host = new ToolStripControlHost(calendar) { Margin = Padding.Empty, Padding = Padding.Empty };
-        var dropDown = new ToolStripDropDown { Padding = Padding.Empty, AutoClose = true, DropShadowEnabled = true };
-        dropDown.Items.Add(host);
-
-        calendar.DateSelected += (_, args) =>
+        CommitText();
+        if (!Enabled || IsDisposed || Disposing)
+            return;
+        if (_calendarDropDown is null)
         {
-            Value = args.Start.Date;
-            dropDown.Close();
-        };
-        dropDown.Closed += (_, _) =>
-        {
-            dropDown.Dispose();
-            calendar.Dispose();
-        };
+            _calendar = new MonthCalendar
+            {
+                MaxSelectionCount = 1,
+                MinDate = MinimumDate,
+                MaxDate = MaximumDate
+            };
+            var host = new ToolStripControlHost(_calendar) { Margin = Padding.Empty, Padding = Padding.Empty };
+            _calendarDropDown = new ToolStripDropDown
+            {
+                Padding = Padding.Empty,
+                AutoClose = true,
+                DropShadowEnabled = true
+            };
+            _calendarDropDown.Items.Add(host);
+            _calendar.DateSelected += (_, args) =>
+            {
+                // Keep the native calendar alive until its owner is disposed. Destroying it
+                // inside DateSelected/Closed interrupts the notification still being handled.
+                _calendarDropDown.Close();
+                Value = args.Start.Date;
+            };
+        }
 
-        dropDown.Show(this, new Point(0, Height));
+        _calendar!.SetDate(_value);
+        _calendarDropDown.Show(this, new Point(0, Height));
+        _calendar.Focus();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _calendarDropDown?.Dispose();
+            _calendarDropDown = null;
+            _calendar = null;
+        }
+        base.Dispose(disposing);
     }
 
     protected override void OnPaint(PaintEventArgs e)

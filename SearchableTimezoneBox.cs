@@ -3,20 +3,25 @@ using System.ComponentModel;
 namespace TimezoneConverter;
 
 /// <summary>
-/// Type-to-filter timezone dropdown. Favorites appear first (starred in list text).
-/// Remembers a pending Windows ID so selection survives handle creation / refilters.
-/// <para>
-/// The native edit field is themed by the hosting container via <see cref="NativeInputTheming"/>,
-/// because a combo forwards WM_CTLCOLOREDIT to its parent rather than handling it itself.
-/// </para>
+/// Type-to-filter timezone dropdown. The committed option is independent of the native
+/// list's temporary selection while searching or moving through suggestions.
 /// </summary>
 internal sealed class SearchableTimezoneBox : ComboBox
 {
     private List<TimezoneOption> _all = [];
+    private TimezoneOption[] _ordered = [];
+    private readonly Dictionary<string, TimezoneOption> _byId = new(StringComparer.OrdinalIgnoreCase);
     private HashSet<string> _favorites = new(StringComparer.OrdinalIgnoreCase);
-    private bool _filtering;
-    private string _filter = "";
+    private TimezoneOption? _selectedOption;
     private string? _pendingWindowsId;
+    private bool _updating;
+    private bool _editing;
+    private bool _refreshQueued;
+    private bool _itemsNeedRefresh;
+    private int _nativeNotificationDepth;
+    private string _filter = "";
+    private int _caretStart;
+    private int _caretLength;
 
     public SearchableTimezoneBox()
     {
@@ -27,254 +32,349 @@ internal sealed class SearchableTimezoneBox : ComboBox
         FlatStyle = FlatStyle.Flat;
         ItemHeight = 22;
         AutoCompleteMode = AutoCompleteMode.None;
+        FormattingEnabled = true;
         BackColor = UiTheme.InputBack;
         ForeColor = UiTheme.TextPrimary;
-
-        TextUpdate += OnTextUpdate;
-        DropDown += (_, _) => ApplyFilter(_filter, keepText: true);
-        SelectionChangeCommitted += (_, _) =>
-        {
-            if (SelectedItem is TimezoneOption opt)
-            {
-                _pendingWindowsId = opt.WindowsId;
-                _filtering = true;
-                try { Text = FormatOption(opt); }
-                finally { _filtering = false; }
-            }
-        };
-        Leave += (_, _) => CommitSelectionFromText();
-        KeyDown += (_, e) =>
-        {
-            if (e.KeyCode == Keys.Enter)
-            {
-                CommitSelectionFromText();
-                e.SuppressKeyPress = true;
-            }
-        };
-        HandleCreated += (_, _) => TryApplyPendingSelection();
-        VisibleChanged += (_, _) =>
-        {
-            if (Visible)
-                TryApplyPendingSelection();
-        };
     }
+
+    public event EventHandler? SelectedOptionChanged;
 
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     [Browsable(false)]
-    public TimezoneOption? SelectedOption
-    {
-        get
-        {
-            if (SelectedItem is TimezoneOption opt)
-                return opt;
-            if (SelectedIndex >= 0 && SelectedIndex < Items.Count)
-                return Items[SelectedIndex] as TimezoneOption;
-
-            // Fall back to pending / text match so PersistSettings still sees the intended zone
-            if (!string.IsNullOrWhiteSpace(_pendingWindowsId))
-            {
-                var pending = _all.FirstOrDefault(o =>
-                    string.Equals(o.WindowsId, _pendingWindowsId, StringComparison.OrdinalIgnoreCase));
-                if (pending is not null)
-                    return pending;
-            }
-
-            return null;
-        }
-    }
+    public TimezoneOption? SelectedOption => _selectedOption;
 
     public void SetOptions(IEnumerable<TimezoneOption> options, IEnumerable<string>? favoriteWindowsIds = null)
     {
+        ArgumentNullException.ThrowIfNull(options);
+        var previousId = _selectedOption?.WindowsId;
         _all = options.ToList();
-        _favorites = new HashSet<string>(
-            favoriteWindowsIds?.Where(id => !string.IsNullOrWhiteSpace(id)) ?? [],
-            StringComparer.OrdinalIgnoreCase);
-        ApplyFilter("", keepText: false);
-        TryApplyPendingSelection();
+        _byId.Clear();
+        foreach (var option in _all)
+            _byId.TryAdd(option.WindowsId, option);
+        _favorites = CreateFavorites(favoriteWindowsIds ?? []);
+        SortOptions();
+        _selectedOption = _pendingWindowsId is not null && _byId.TryGetValue(_pendingWindowsId, out var pending)
+            ? pending
+            : null;
+        _editing = false;
+        _filter = "";
+        RequestRefresh();
+        NotifySelectionChanged(previousId);
     }
 
     public void SetFavorites(IEnumerable<string> favoriteWindowsIds)
     {
-        _favorites = new HashSet<string>(
-            favoriteWindowsIds.Where(id => !string.IsNullOrWhiteSpace(id)),
-            StringComparer.OrdinalIgnoreCase);
-        var currentId = SelectedOption?.WindowsId ?? _pendingWindowsId;
-        ApplyFilter(_filter, keepText: true);
-        if (currentId is not null)
-            SelectWindowsId(currentId);
+        ArgumentNullException.ThrowIfNull(favoriteWindowsIds);
+        var favorites = CreateFavorites(favoriteWindowsIds);
+        if (_favorites.SetEquals(favorites))
+            return;
+
+        _favorites = favorites;
+        SortOptions();
+        _itemsNeedRefresh = true;
+        RequestRefresh();
+        Invalidate();
     }
 
     public bool SelectWindowsId(string windowsId)
     {
         if (string.IsNullOrWhiteSpace(windowsId))
             return false;
-
-        _pendingWindowsId = windowsId;
-
-        if (!Items.Cast<object>().OfType<TimezoneOption>()
-                .Any(o => string.Equals(o.WindowsId, windowsId, StringComparison.OrdinalIgnoreCase)))
+        if (!_byId.TryGetValue(windowsId, out var option))
         {
-            ApplyFilter("", keepText: false);
+            // Startup can request a zone before its options have been loaded.
+            if (_all.Count == 0)
+                _pendingWindowsId = windowsId;
+            return false;
         }
 
-        for (var i = 0; i < Items.Count; i++)
-        {
-            if (Items[i] is TimezoneOption opt &&
-                string.Equals(opt.WindowsId, windowsId, StringComparison.OrdinalIgnoreCase))
-            {
-                SelectedIndex = i;
-                _filtering = true;
-                try { Text = FormatOption(opt); }
-                finally { _filtering = false; }
-                return true;
-            }
-        }
-
-        // Not in filtered list yet — keep pending; ApplyFilter/HandleCreated will retry
-        return false;
+        CommitOption(option);
+        return true;
     }
 
     public bool SelectAbbreviation(string abbreviation)
     {
-        for (var i = 0; i < Items.Count; i++)
-        {
-            if (Items[i] is TimezoneOption opt &&
-                string.Equals(opt.Abbreviation, abbreviation, StringComparison.OrdinalIgnoreCase))
-            {
-                return SelectWindowsId(opt.WindowsId);
-            }
-        }
-
-        var match = _all.FirstOrDefault(o =>
+        var match = _ordered.FirstOrDefault(o =>
             string.Equals(o.Abbreviation, abbreviation, StringComparison.OrdinalIgnoreCase));
         if (match is not null)
-            return SelectWindowsId(match.WindowsId);
-
-        if (Items.Count > 0)
         {
-            SelectedIndex = 0;
-            return false;
+            CommitOption(match);
+            return true;
         }
 
+        if (_selectedOption is null && _ordered.Length > 0)
+            CommitOption(_ordered[0]);
         return false;
     }
 
-    private void TryApplyPendingSelection()
+    private static HashSet<string> CreateFavorites(IEnumerable<string> ids) =>
+        new(ids.Where(id => !string.IsNullOrWhiteSpace(id)), StringComparer.OrdinalIgnoreCase);
+
+    private void SortOptions() => _ordered = _all
+        .OrderByDescending(o => _favorites.Contains(o.WindowsId))
+        .ThenBy(o => o.Abbreviation, StringComparer.OrdinalIgnoreCase)
+        .ThenBy(o => o.DisplayName, StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+
+    protected override void OnTextUpdate(EventArgs e)
     {
-        if (string.IsNullOrWhiteSpace(_pendingWindowsId) || _filtering)
+        if (_updating)
             return;
-        SelectWindowsId(_pendingWindowsId);
+
+        _editing = true;
+        _filter = Text;
+        _caretStart = SelectionStart;
+        _caretLength = SelectionLength;
+        // Changing Items inside CBN_EDITUPDATE/CBN_DROPDOWN can leave the native
+        // selection pointing past the managed collection. Wait for it to finish.
+        RequestRefresh(defer: true);
+        base.OnTextUpdate(e);
     }
 
-    private void OnTextUpdate(object? sender, EventArgs e)
+    protected override void OnSelectionChangeCommitted(EventArgs e)
     {
-        if (_filtering)
+        if (_updating)
             return;
-        ApplyFilter(Text, keepText: true);
-        DroppedDown = true;
-        SelectionStart = Text.Length;
-        SelectionLength = 0;
-    }
 
-    private void ApplyFilter(string filter, bool keepText)
-    {
-        _filter = filter ?? "";
-        var q = _filter.Trim();
-
-        IEnumerable<TimezoneOption> query = _all;
-        if (q.Length > 0)
+        _nativeNotificationDepth++;
+        try
         {
-            query = _all.Where(o =>
-                o.Abbreviation.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                o.DisplayName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                o.WindowsId.Contains(q, StringComparison.OrdinalIgnoreCase));
+            if (SelectedItem is TimezoneOption option)
+                CommitOption(option);
+            base.OnSelectionChangeCommitted(e);
+        }
+        finally
+        {
+            _nativeNotificationDepth--;
+        }
+    }
+
+    protected override void OnSelectedIndexChanged(EventArgs e)
+    {
+        if (!_updating)
+            base.OnSelectedIndexChanged(e);
+    }
+
+    protected override void OnDropDown(EventArgs e)
+    {
+        // A user can still click the arrow after a search returns no matches.
+        // Close that empty popup after its native opening notification completes.
+        if (!_updating && Items.Count == 0)
+            RequestRefresh(defer: true);
+        base.OnDropDown(e);
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        const int reflectedCommand = 0x2000 + 0x0111; // WM_REFLECT + WM_COMMAND
+        const int selectionCanceled = 10; // CBN_SELENDCANCEL
+        if (m.Msg != reflectedCommand)
+        {
+            base.WndProc(ref m);
+            return;
         }
 
-        var ordered = query
-            .OrderByDescending(o => _favorites.Contains(o.WindowsId))
-            .ThenBy(o => o.Abbreviation, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(o => o.DisplayName, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        _nativeNotificationDepth++;
+        try
+        {
+            // Popup cancellation can be consumed by the native list before KeyDown.
+            if (!_updating && ((m.WParam.ToInt64() >> 16) & 0xffff) == selectionCanceled)
+                RestoreCommittedSelection();
+            base.WndProc(ref m);
+        }
+        finally
+        {
+            _nativeNotificationDepth--;
+        }
+    }
 
-        var previous = keepText ? Text : null;
-        var selectedId = SelectedOption?.WindowsId ?? _pendingWindowsId;
+    protected override void OnLeave(EventArgs e)
+    {
+        _nativeNotificationDepth++;
+        try
+        {
+            if (_editing)
+                CommitSelectionFromText(useHighlightedItem: false);
+            base.OnLeave(e);
+        }
+        finally
+        {
+            _nativeNotificationDepth--;
+        }
+    }
 
-        _filtering = true;
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        _nativeNotificationDepth++;
+        try
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                CommitSelectionFromText(useHighlightedItem: true);
+                DroppedDown = false;
+                e.SuppressKeyPress = true;
+            }
+            else if (e.KeyCode == Keys.Escape)
+            {
+                RestoreCommittedSelection();
+                DroppedDown = false;
+                e.SuppressKeyPress = true;
+            }
+            base.OnKeyDown(e);
+        }
+        finally
+        {
+            _nativeNotificationDepth--;
+        }
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        RequestRefresh(defer: true);
+    }
+
+    protected override void OnHandleDestroyed(EventArgs e)
+    {
+        _refreshQueued = false;
+        base.OnHandleDestroyed(e);
+    }
+
+    private void RequestRefresh(bool defer = false)
+    {
+        if (IsDisposed || Disposing || _refreshQueued)
+            return;
+        if (IsHandleCreated && (defer || _nativeNotificationDepth > 0))
+        {
+            _refreshQueued = true;
+            BeginInvoke((Action)(() =>
+            {
+                _refreshQueued = false;
+                if (!IsDisposed && !Disposing)
+                    RefreshItemsFromFilter();
+            }));
+            return;
+        }
+
+        RefreshItemsFromFilter();
+    }
+
+    private void RefreshItemsFromFilter()
+    {
+        var query = _editing ? _filter.Trim() : "";
+        var matches = query.Length == 0
+            ? _ordered
+            : _ordered.Where(o => MatchesFilter(o, query)).ToArray();
+        var itemsChanged = _itemsNeedRefresh || Items.Count != matches.Length;
+        for (var i = 0; !itemsChanged && i < matches.Length; i++)
+            itemsChanged = !ReferenceEquals(Items[i], matches[i]);
+
+        _updating = true;
         BeginUpdate();
         try
         {
-            Items.Clear();
-            foreach (var o in ordered)
-                Items.Add(o);
-
-            if (selectedId is not null)
+            if (matches.Length == 0 && DroppedDown)
+                DroppedDown = false;
+            if (itemsChanged)
             {
-                for (var i = 0; i < Items.Count; i++)
-                {
-                    if (Items[i] is TimezoneOption opt &&
-                        string.Equals(opt.WindowsId, selectedId, StringComparison.OrdinalIgnoreCase))
-                    {
-                        SelectedIndex = i;
-                        Text = FormatOption(opt);
-                        _pendingWindowsId = selectedId;
-                        break;
-                    }
-                }
+                // Clear native selection before resetting its backing collection.
+                SelectedIndex = -1;
+                Items.Clear();
+                Items.AddRange(matches);
+                _itemsNeedRefresh = false;
             }
-            else if (keepText && previous is not null)
+
+            if (_editing)
             {
-                Text = previous;
+                SelectedIndex = -1;
+                Text = _filter;
+                SelectionStart = Math.Min(_caretStart, Text.Length);
+                SelectionLength = Math.Min(_caretLength, Text.Length - SelectionStart);
+            }
+            else
+            {
+                SelectedIndex = _selectedOption is null ? -1 : Array.IndexOf(matches, _selectedOption);
+                Text = _selectedOption is null ? "" : FormatOption(_selectedOption);
             }
         }
         finally
         {
             EndUpdate();
-            _filtering = false;
+            _updating = false;
+        }
+
+        if (_editing && matches.Length > 0 && Focused && !DroppedDown)
+        {
+            DroppedDown = true;
+            SelectionStart = Math.Min(_caretStart, Text.Length);
+            SelectionLength = Math.Min(_caretLength, Text.Length - SelectionStart);
         }
     }
 
-    private void CommitSelectionFromText()
+    private static bool MatchesFilter(TimezoneOption option, string query) =>
+        option.Abbreviation.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+        option.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+        option.WindowsId.Contains(query, StringComparison.OrdinalIgnoreCase);
+
+    private void CommitSelectionFromText(bool useHighlightedItem)
     {
-        if (SelectedItem is TimezoneOption selected)
+        if (useHighlightedItem && (!_editing || !_refreshQueued) && SelectedItem is TimezoneOption selected)
         {
-            _pendingWindowsId = selected.WindowsId;
+            CommitOption(selected);
             return;
         }
 
-        var q = Text.Trim();
-        if (q.Length == 0)
-            return;
-
-        var match = _all.FirstOrDefault(o =>
-            string.Equals(o.Abbreviation, q, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(FormatOption(o), q, StringComparison.OrdinalIgnoreCase) ||
-            o.DisplayName.Contains(q, StringComparison.OrdinalIgnoreCase));
-
+        var query = (_editing ? _filter : Text).Trim();
+        var match = query.Length == 0 ? null : _ordered.FirstOrDefault(o =>
+            string.Equals(o.Abbreviation, query, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(o.WindowsId, query, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(o.DisplayName, query, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(FormatOption(o), query, StringComparison.OrdinalIgnoreCase));
+        match ??= query.Length == 0 ? null : _ordered.FirstOrDefault(o => MatchesFilter(o, query));
         if (match is not null)
-            SelectWindowsId(match.WindowsId);
-        else if (SelectedOption is not null)
-        {
-            _filtering = true;
-            try { Text = FormatOption(SelectedOption); }
-            finally { _filtering = false; }
-        }
+            CommitOption(match);
+        else
+            RestoreCommittedSelection();
     }
 
-    private string FormatOption(TimezoneOption opt) =>
-        _favorites.Contains(opt.WindowsId)
-            ? $"* {opt.Abbreviation} - {opt.DisplayName}"
-            : $"{opt.Abbreviation} - {opt.DisplayName}";
+    private void CommitOption(TimezoneOption option)
+    {
+        var previousId = _selectedOption?.WindowsId;
+        _selectedOption = option;
+        _pendingWindowsId = option.WindowsId;
+        RestoreCommittedSelection();
+        NotifySelectionChanged(previousId);
+    }
+
+    private void RestoreCommittedSelection()
+    {
+        _editing = false;
+        _filter = "";
+        RequestRefresh();
+    }
+
+    private void NotifySelectionChanged(string? previousId)
+    {
+        if (!string.Equals(previousId, _selectedOption?.WindowsId, StringComparison.OrdinalIgnoreCase))
+            SelectedOptionChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    protected override void OnFormat(ListControlConvertEventArgs e)
+    {
+        base.OnFormat(e);
+        if (e.ListItem is TimezoneOption option)
+            e.Value = FormatOption(option);
+    }
+
+    private string FormatOption(TimezoneOption option) =>
+        _favorites.Contains(option.WindowsId)
+            ? $"* {option.Abbreviation} - {option.DisplayName}"
+            : $"{option.Abbreviation} - {option.DisplayName}";
 
     protected override void OnDrawItem(DrawItemEventArgs e)
     {
         e.DrawBackground();
-        if (e.Index < 0 || e.Index >= Items.Count)
-        {
-            base.OnDrawItem(e);
-            return;
-        }
-
-        if (Items[e.Index] is not TimezoneOption opt)
+        if (e.Index < 0 || e.Index >= Items.Count || Items[e.Index] is not TimezoneOption option)
         {
             base.OnDrawItem(e);
             return;
@@ -283,16 +383,10 @@ internal sealed class SearchableTimezoneBox : ComboBox
         var selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
         var back = selected ? UiTheme.SegmentActive : UiTheme.InputBack;
         var fore = selected ? UiTheme.TextOnAccent : UiTheme.TextPrimary;
-        using (var b = new SolidBrush(back))
-            e.Graphics.FillRectangle(b, e.Bounds);
+        using (var brush = new SolidBrush(back))
+            e.Graphics.FillRectangle(brush, e.Bounds);
 
-        var text = FormatOption(opt);
-        TextRenderer.DrawText(
-            e.Graphics,
-            text,
-            Font,
-            e.Bounds,
-            fore,
+        TextRenderer.DrawText(e.Graphics, FormatOption(option), Font, e.Bounds, fore,
             TextFormatFlags.EndEllipsis | TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPrefix);
     }
 }

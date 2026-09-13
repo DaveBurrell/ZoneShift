@@ -11,7 +11,10 @@ internal sealed class LedClockDisplay : Control
     private string _timeText = "--:--";
     private string _zoneText = "";
     private string _captionText = "";
-    private bool _large;
+    private readonly bool _large;
+    private readonly Font _zoneFont;
+    private readonly Font _captionFont;
+    private Font? _timeFont;
     private bool _colonOn = true;
     private Color _gutterColor = UiTheme.TileBack;
     private readonly System.Windows.Forms.Timer? _blinkTimer;
@@ -19,6 +22,8 @@ internal sealed class LedClockDisplay : Control
     public LedClockDisplay(bool large = false)
     {
         _large = large;
+        _zoneFont = new Font("Segoe UI Semibold", large ? 9.5f : 8f);
+        _captionFont = new Font("Segoe UI Semibold", large ? 7.5f : 7f);
         SetStyle(
             ControlStyles.AllPaintingInWmPaint |
             ControlStyles.UserPaint |
@@ -36,6 +41,9 @@ internal sealed class LedClockDisplay : Control
         {
             UiTheme.ThemeChanged -= OnThemeChanged;
             _blinkTimer?.Dispose();
+            _zoneFont.Dispose();
+            _captionFont.Dispose();
+            _timeFont?.Dispose();
         };
 
         if (large)
@@ -200,9 +208,8 @@ internal sealed class LedClockDisplay : Control
         if (zoneH > 0 && !string.IsNullOrWhiteSpace(_zoneText))
         {
             var zoneRect = new Rectangle(content.X, content.Y, content.Width, zoneH);
-            using var zoneFont = new Font("Segoe UI Semibold", _large ? 9.5f : 8f);
             using var zoneBrush = new SolidBrush(UiTheme.Accent);
-            g.DrawString(_zoneText.ToUpperInvariant(), zoneFont, zoneBrush, zoneRect, sfCenter);
+            g.DrawString(_zoneText.ToUpperInvariant(), _zoneFont, zoneBrush, zoneRect, sfCenter);
         }
 
         var timeTop = content.Y + zoneH;
@@ -210,34 +217,31 @@ internal sealed class LedClockDisplay : Control
         var timeRect = new Rectangle(content.X, timeTop, content.Width, timeH);
 
         var ghost = BuildGhostMask(_timeText);
-        using (var ghostFont = CreateTimeFont(timeRect))
+        var timeFont = GetTimeFont(timeRect);
         using (var ghostBrush = new SolidBrush(Color.FromArgb(_large ? 28 : 20, UiTheme.ClockDim)))
-            g.DrawString(ghost, ghostFont, ghostBrush, timeRect, sfCenter);
+            g.DrawString(ghost, timeFont, ghostBrush, timeRect, sfCenter);
 
         var displayTime = ApplyColonBlink(_timeText);
-        using (var timeFont = CreateTimeFont(timeRect))
-        {
-            UiPaint.DrawGlowText(
-                g,
-                displayTime,
-                timeFont,
-                UiTheme.ClockFore,
-                UiTheme.ClockCore,
-                timeRect,
-                sfCenter);
-        }
+        UiPaint.DrawGlowText(
+            g,
+            displayTime,
+            timeFont,
+            UiTheme.ClockFore,
+            UiTheme.ClockCore,
+            timeRect,
+            sfCenter);
 
         if (capH > 0 && !string.IsNullOrWhiteSpace(_captionText))
         {
             var capRect = new Rectangle(content.X, content.Bottom - capH, content.Width, capH);
-            using var capFont = new Font("Segoe UI Semibold", _large ? 7.5f : 7f);
             using var capBrush = new SolidBrush(UiTheme.LedCaption);
-            g.DrawString(_captionText, capFont, capBrush, capRect, sfCenter);
+            g.DrawString(_captionText, _captionFont, capBrush, capRect, sfCenter);
         }
     }
 
     private static readonly string[] MonoFamilies =
         ["Consolas", "Cascadia Mono", "Lucida Console", "Courier New"];
+    private static readonly Lazy<string> MonoFamily = new(ResolveMonoFamily);
 
     /// <summary>
     /// Resolves a monospace face. The digits and the blinking colon rely on a fixed advance
@@ -245,12 +249,22 @@ internal sealed class LedClockDisplay : Control
     /// <see cref="Font"/> constructor silently substitutes a proportional face instead of
     /// throwing when the name is unknown.
     /// </summary>
-    private Font CreateTimeFont(Rectangle timeRect)
+    private Font GetTimeFont(Rectangle timeRect)
     {
         var size = _large
             ? Math.Clamp(timeRect.Height * 0.52f, 16f, 34f)
             : Math.Clamp(timeRect.Height * 0.58f, 11f, 20f);
 
+        if (_timeFont is null || _timeFont.Size != size)
+        {
+            _timeFont?.Dispose();
+            _timeFont = new Font(MonoFamily.Value, size, FontStyle.Bold, GraphicsUnit.Point);
+        }
+        return _timeFont;
+    }
+
+    private static string ResolveMonoFamily()
+    {
         foreach (var family in MonoFamilies)
         {
             try
@@ -262,10 +276,11 @@ internal sealed class LedClockDisplay : Control
                 continue;
             }
 
-            return new Font(family, size, FontStyle.Bold, GraphicsUnit.Point);
+            return family;
         }
 
-        return new Font(FontFamily.GenericMonospace, size, FontStyle.Bold);
+        using var fallback = FontFamily.GenericMonospace;
+        return fallback.Name;
     }
 
     private string ApplyColonBlink(string text)
@@ -273,7 +288,7 @@ internal sealed class LedClockDisplay : Control
         if (_colonOn || _blinkTimer is null || !_blinkTimer.Enabled)
             return text;
 
-        // CreateTimeFont only ever resolves a monospace family, so ' ' and ':' share an
+        // GetTimeFont only ever resolves a monospace family, so ' ' and ':' share an
         // advance width and blanking the colon cannot shift the digits. The ghost "88:88"
         // mask still shows a dim colon underneath, which is how an unlit LED segment reads.
         return text.Replace(':', ' ');

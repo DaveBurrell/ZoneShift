@@ -12,6 +12,9 @@ internal sealed class TimeEntryCombo : ComboBox
     private bool _use24Hour;
     private bool _includeSeconds;
     private bool _suppress;
+    private bool _presetsInitialized;
+    private bool _handlingSelection;
+    private bool _presetsDirty;
 
     public event EventHandler? TimeChanged;
 
@@ -31,8 +34,30 @@ internal sealed class TimeEntryCombo : ComboBox
         {
             if (_suppress)
                 return;
-            if (TryParse(Text, out var t))
-                SetTimeInternal(t, raiseEvent: true, updateText: true);
+
+            _handlingSelection = true;
+            try
+            {
+                // The edit text can still describe the previous selection during
+                // the native notification. Read the selected list item directly.
+                var index = SelectedIndex;
+                if (index >= 0 && index < Items.Count &&
+                    TryParse(GetItemText(Items[index]), out var t))
+                    SetTimeInternal(t, raiseEvent: true, updateText: true);
+            }
+            finally
+            {
+                _handlingSelection = false;
+                if (_presetsDirty && !IsDisposed && !Disposing)
+                {
+                    // A TimeChanged subscriber can change the format. Wait until
+                    // the native selection notification has finished to replace items.
+                    if (IsHandleCreated)
+                        BeginInvoke((Action)RefreshPendingPresets);
+                    else
+                        RefreshPendingPresets();
+                }
+            }
         };
 
         // Commit typed values when focus leaves or Enter is pressed
@@ -45,6 +70,8 @@ internal sealed class TimeEntryCombo : ComboBox
                 e.SuppressKeyPress = true;
             }
         };
+
+        Configure(use24Hour: false, includeSeconds: false);
     }
 
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
@@ -52,7 +79,7 @@ internal sealed class TimeEntryCombo : ComboBox
     public TimeSpan TimeOfDay
     {
         get => _timeOfDay;
-        set => SetTimeInternal(Normalize(value), raiseEvent: false, updateText: true);
+        set => SetTimeInternal(value, raiseEvent: false, updateText: true);
     }
 
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
@@ -60,14 +87,7 @@ internal sealed class TimeEntryCombo : ComboBox
     public bool Use24Hour
     {
         get => _use24Hour;
-        set
-        {
-            if (_use24Hour == value)
-                return;
-            _use24Hour = value;
-            RebuildPresets();
-            UpdateDisplayText();
-        }
+        set => Configure(value, _includeSeconds);
     }
 
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
@@ -75,35 +95,46 @@ internal sealed class TimeEntryCombo : ComboBox
     public bool IncludeSeconds
     {
         get => _includeSeconds;
-        set
-        {
-            if (_includeSeconds == value)
-                return;
-            _includeSeconds = value;
-            UpdateDisplayText();
-        }
+        set => Configure(_use24Hour, value);
     }
 
     public void Configure(bool use24Hour, bool includeSeconds)
     {
+        var rebuild = !_presetsInitialized || _use24Hour != use24Hour;
+        if (!rebuild && _includeSeconds == includeSeconds)
+            return;
+
         _use24Hour = use24Hour;
         _includeSeconds = includeSeconds;
-        RebuildPresets();
+        if (rebuild)
+            RebuildPresets();
         UpdateDisplayText();
     }
 
     public void RebuildPresets()
     {
+        if (_handlingSelection)
+        {
+            _presetsDirty = true;
+            return;
+        }
+
+        var presets = new object[48];
+        for (var index = 0; index < presets.Length; index++)
+            presets[index] = FormatTime(TimeSpan.FromMinutes(index * 30), includeSeconds: false);
+
+        var wasSuppressed = _suppress;
         _suppress = true;
+        BeginUpdate();
         try
         {
             var previous = Text;
+            // Clear the native selection before the managed collection changes.
+            SelectedIndex = -1;
             Items.Clear();
-            for (var minutes = 0; minutes < 24 * 60; minutes += 30)
-            {
-                var t = TimeSpan.FromMinutes(minutes);
-                Items.Add(FormatTime(t, includeSeconds: false));
-            }
+            Items.AddRange(presets);
+            _presetsInitialized = true;
+            _presetsDirty = false;
 
             // Restore typed/selected text if possible
             if (!string.IsNullOrWhiteSpace(previous))
@@ -113,8 +144,17 @@ internal sealed class TimeEntryCombo : ComboBox
         }
         finally
         {
-            _suppress = false;
+            EndUpdate();
+            _suppress = wasSuppressed;
         }
+    }
+
+    private void RefreshPendingPresets()
+    {
+        if (!_presetsDirty || IsDisposed || Disposing)
+            return;
+        RebuildPresets();
+        UpdateDisplayText();
     }
 
     private void CommitTypedText()
@@ -148,14 +188,19 @@ internal sealed class TimeEntryCombo : ComboBox
 
     private void UpdateDisplayText()
     {
+        var display = FormatTime(_timeOfDay, _includeSeconds);
+        if (Text == display)
+            return;
+
+        var wasSuppressed = _suppress;
         _suppress = true;
         try
         {
-            Text = FormatTime(_timeOfDay, _includeSeconds);
+            Text = display;
         }
         finally
         {
-            _suppress = false;
+            _suppress = wasSuppressed;
         }
     }
 
@@ -170,4 +215,3 @@ internal sealed class TimeEntryCombo : ComboBox
 
     private static TimeSpan Normalize(TimeSpan t) => TimeParser.Normalize(t);
 }
-

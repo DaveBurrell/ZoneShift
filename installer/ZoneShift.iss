@@ -1,10 +1,10 @@
 ; ZoneShift installer - compiled by Inno Setup 6
 ; Pass architecture defines from pack-installer.ps1:
-;   ISCC /DAppArch=x64 /DPublishDir=..\publish\win-x64 /DMyAppVersion=1.6.3 ZoneShift.iss
-;   ISCC /DAppArch=arm64 /DPublishDir=..\publish\win-arm64 /DMyAppVersion=1.6.3 ZoneShift.iss
+;   ISCC /DAppArch=x64 /DPublishDir=..\publish\win-x64 /DMyAppVersion=1.7.2 ZoneShift.iss
+;   ISCC /DAppArch=arm64 /DPublishDir=..\publish\win-arm64 /DMyAppVersion=1.7.2 ZoneShift.iss
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.6.3"
+  #define MyAppVersion "1.7.2"
 #endif
 #ifndef AppArch
   #define AppArch "x64"

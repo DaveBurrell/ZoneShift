@@ -2,6 +2,8 @@
 
 A polished Windows desktop app that converts a time in **your PC timezone** into up to **8 other timezones** - or the other way around - with digital clock readouts and persistent preferences.
 
+ZoneShift now also has a native Android app. See [android/README.md](android/README.md) for its features, setup, build commands, and architecture.
+
 ## Features
 
 - **Auto-detects** your Windows local timezone
@@ -51,8 +53,8 @@ powershell -ExecutionPolicy Bypass -File .\pack-installer.ps1
 
 Output (dual architecture):
 
-- `dist\ZoneShift-Setup-1.6.3-x64.exe`
-- `dist\ZoneShift-Setup-1.6.3-arm64.exe`
+- `dist\ZoneShift-Setup-1.7.2-x64.exe`
+- `dist\ZoneShift-Setup-1.7.2-arm64.exe`
 
 The installer:
 - Per-user install under `%LocalAppData%\Programs\ZoneShift` (no admin required)
@@ -60,7 +62,7 @@ The installer:
 - **Start Menu** entry and uninstaller
 - Self-contained (~60+ MB setup; no .NET install needed on the target PC)
 
-Tag releases (`v1.7.0`) also build installers via GitHub Actions (`.github/workflows/release.yml`).
+Tag releases (`v1.7.2`) also build installers via GitHub Actions (`.github/workflows/release.yml`).
 
 Settings live in `%AppData%\ZoneShift\settings.json` and are kept across upgrades.
 

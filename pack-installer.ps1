@@ -5,12 +5,14 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
 
-$version = "1.6.3" # fallback if csproj parse fails
 $csproj = Join-Path $root "TimezoneConverter.csproj"
 # Prefer version from csproj if present
 $csprojText = Get-Content $csproj -Raw
 if ($csprojText -match '<Version>([^<]+)</Version>') {
     $version = $Matches[1].Trim()
+}
+else {
+    throw "The project must declare a version before building installers."
 }
 
 $distDir = Join-Path $root "dist"
@@ -24,9 +26,14 @@ if (-not (Test-Path $iscc)) {
 New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 
 function Publish-Arch([string]$rid) {
-    $out = Join-Path $root "publish\$rid"
+    if ($rid -notin @('win-x64', 'win-arm64')) { throw "Unsupported release target: $rid" }
+    $publishRoot = [System.IO.Path]::GetFullPath((Join-Path $root 'publish'))
+    $out = [System.IO.Path]::GetFullPath((Join-Path $publishRoot $rid))
+    if (-not $out.StartsWith($publishRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "The publish directory must stay inside the workspace publish folder."
+    }
     Write-Host "==> Publishing self-contained ZoneShift ($rid)..." -ForegroundColor Cyan
-    if (Test-Path $out) { Remove-Item $out -Recurse -Force }
+    if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Recurse -Force }
     New-Item -ItemType Directory -Force -Path $out | Out-Null
 
     dotnet publish $csproj `

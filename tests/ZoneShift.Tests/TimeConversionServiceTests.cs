@@ -120,6 +120,90 @@ public class TimeConversionServiceTests
         Assert.Contains("ambiguous", snap.Warning, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData(0.5)]
+    [InlineData(1)]
+    [InlineData(4)]
+    [InlineData(14)]
+    public void Convert_advances_invalid_time_by_the_actual_dst_gap(double daylightHours)
+    {
+        var zone = CreateDstZone(daylightHours);
+        var wall = new DateTime(2024, 3, 10, 2, 15, 0);
+        Assert.True(zone.IsInvalidTime(wall));
+
+        var snap = TimeConversionService.Convert(wall, zone, zone, []);
+
+        Assert.Equal(wall.AddHours(daylightHours), snap.InputWallTime);
+        Assert.Equal(snap.InputWallTime, snap.PrimaryLocalTime);
+        Assert.Equal(DateTime.SpecifyKind(wall, DateTimeKind.Utc), snap.Utc);
+        Assert.Equal(TimeSpan.FromHours(daylightHours), snap.PrimaryUtcOffset);
+        Assert.NotNull(snap.Warning);
+        Assert.False(zone.IsInvalidTime(snap.InputWallTime));
+    }
+
+    [Fact]
+    public void Convert_handles_a_gap_when_negative_daylight_saving_ends()
+    {
+        var zone = CreateDstZone(-0.5);
+        var wall = new DateTime(2024, 11, 3, 2, 15, 0);
+        Assert.True(zone.IsInvalidTime(wall));
+
+        var snap = TimeConversionService.Convert(wall, zone, zone, []);
+
+        Assert.Equal(new DateTime(2024, 11, 3, 2, 45, 0), snap.InputWallTime);
+        Assert.Equal(snap.InputWallTime, snap.PrimaryLocalTime);
+        Assert.Equal(TimeSpan.Zero, snap.PrimaryUtcOffset);
+    }
+
+    [Fact]
+    public void Convert_ambiguous_input_uses_and_reports_the_earlier_occurrence()
+    {
+        var zone = CreateDstZone(1, -5);
+        var wall = new DateTime(2024, 11, 3, 1, 30, 0);
+
+        var snap = TimeConversionService.Convert(wall, zone, zone, [("DST", zone.Id, zone)]);
+
+        Assert.Equal(new DateTime(2024, 11, 3, 5, 30, 0, DateTimeKind.Utc), snap.Utc);
+        Assert.Equal(wall, snap.PrimaryLocalTime);
+        Assert.Equal(TimeSpan.FromHours(-4), snap.PrimaryUtcOffset);
+        Assert.Equal(TimeSpan.FromHours(-4), Assert.Single(snap.Targets).UtcOffset);
+        Assert.Contains("UTC-4", snap.Warning);
+    }
+
+    [Theory]
+    [InlineData(5, -4)]
+    [InlineData(6, -5)]
+    public void Convert_preserves_the_offset_of_each_repeated_target_time(int utcHour, int expectedOffset)
+    {
+        var zone = CreateDstZone(1, -5);
+        var utc = new DateTime(2024, 11, 3, utcHour, 30, 0, DateTimeKind.Utc);
+
+        var snap = TimeConversionService.Convert(utc, TimeZoneInfo.Utc, zone, [("DST", zone.Id, zone)]);
+
+        Assert.Equal(new DateTime(2024, 11, 3, 1, 30, 0), snap.PrimaryLocalTime);
+        Assert.Equal(TimeSpan.FromHours(expectedOffset), snap.PrimaryUtcOffset);
+        Assert.Equal(TimeSpan.FromHours(expectedOffset), Assert.Single(snap.Targets).UtcOffset);
+        Assert.Null(snap.Warning);
+    }
+
+    private static TimeZoneInfo CreateDstZone(double daylightHours, double baseOffsetHours = 0)
+    {
+        var transitionTime = new DateTime(1, 1, 1, 2, 0, 0);
+        var rule = TimeZoneInfo.AdjustmentRule.CreateAdjustmentRule(
+            new DateTime(2024, 1, 1),
+            new DateTime(2024, 12, 31),
+            TimeSpan.FromHours(daylightHours),
+            TimeZoneInfo.TransitionTime.CreateFixedDateRule(transitionTime, 3, 10),
+            TimeZoneInfo.TransitionTime.CreateFixedDateRule(transitionTime, 11, 3));
+        return TimeZoneInfo.CreateCustomTimeZone(
+            $"Test DST {daylightHours}",
+            TimeSpan.FromHours(baseOffsetHours),
+            "Test timezone",
+            "Test standard time",
+            "Test daylight time",
+            [rule]);
+    }
+
     [Fact]
     public void FormatCopy_multiline_and_one_line()
     {

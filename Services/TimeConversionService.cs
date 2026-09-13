@@ -48,74 +48,35 @@ public static class TimeConversionService
     {
         var unspecified = DateTime.SpecifyKind(inputWallUnspecified, DateTimeKind.Unspecified);
         string? warning = null;
-        var kind = ClassifyLocalTime(inputTimeZone, unspecified);
-
-        DateTime utc;
         var effectiveWall = unspecified;
 
-        if (kind == LocalTimeKind.Invalid)
+        if (inputTimeZone.IsInvalidTime(unspecified))
         {
-            // Spring-forward gap: time does not exist — advance to next valid instant
-            effectiveWall = unspecified.AddHours(1);
-            // keep advancing until valid (rare multi-hour gaps)
-            var guard = 0;
-            while (inputTimeZone.IsInvalidTime(DateTime.SpecifyKind(effectiveWall, DateTimeKind.Unspecified)) && guard++ < 4)
-                effectiveWall = effectiveWall.AddMinutes(30);
-
+            effectiveWall = ShiftOutOfGap(inputTimeZone, unspecified);
             warning =
                 $"{unspecified:h:mm tt} does not exist in {inputTimeZone.Id} (DST spring-forward). " +
                 $"Using {effectiveWall:h:mm tt} instead.";
-            utc = TimeZoneInfo.ConvertTimeToUtc(
-                DateTime.SpecifyKind(effectiveWall, DateTimeKind.Unspecified),
-                inputTimeZone);
         }
-        else if (kind == LocalTimeKind.Ambiguous)
+
+        DateTime utc;
+        if (inputTimeZone.IsAmbiguousTime(effectiveWall))
         {
-            // Fall-back: prefer the earlier (DST) offset for consistency
-            var offsets = inputTimeZone.GetAmbiguousTimeOffsets(unspecified);
-            var preferred = offsets.OrderByDescending(o => o).First(); // larger offset = usually DST
-            utc = DateTime.SpecifyKind(unspecified - preferred, DateTimeKind.Utc);
-            warning =
-                $"{unspecified:h:mm tt} is ambiguous in {inputTimeZone.Id} (DST fall-back). " +
+            // The larger offset identifies the earlier occurrence of the repeated wall time.
+            var offsets = inputTimeZone.GetAmbiguousTimeOffsets(effectiveWall);
+            var preferred = offsets[0] > offsets[1] ? offsets[0] : offsets[1];
+            utc = new DateTime(
+                Math.Clamp(effectiveWall.Ticks - preferred.Ticks, DateTime.MinValue.Ticks, DateTime.MaxValue.Ticks),
+                DateTimeKind.Utc);
+            warning ??=
+                $"{effectiveWall:h:mm tt} is ambiguous in {inputTimeZone.Id} (DST fall-back). " +
                 $"Using the {FormatOffset(preferred)} occurrence.";
-            effectiveWall = unspecified;
         }
         else
         {
-            try
-            {
-                utc = TimeZoneInfo.ConvertTimeToUtc(unspecified, inputTimeZone);
-            }
-            catch (ArgumentException)
-            {
-                effectiveWall = unspecified.AddHours(1);
-                utc = TimeZoneInfo.ConvertTimeToUtc(
-                    DateTime.SpecifyKind(effectiveWall, DateTimeKind.Unspecified),
-                    inputTimeZone);
-                warning =
-                    $"Could not convert {unspecified:h:mm tt} in {inputTimeZone.Id}. Using {effectiveWall:h:mm tt}.";
-            }
+            utc = TimeZoneInfo.ConvertTimeToUtc(effectiveWall, inputTimeZone);
         }
 
-        var primary = TimeZoneInfo.ConvertTimeFromUtc(utc, primaryTimeZone);
-        var primaryOffset = primaryTimeZone.GetUtcOffset(primary);
-
-        var results = new List<ZoneConversionResult>(targets.Count);
-        foreach (var (abbr, windowsId, zone) in targets)
-        {
-            var converted = TimeZoneInfo.ConvertTimeFromUtc(utc, zone);
-            var offset = zone.GetUtcOffset(converted);
-            var dayDelta = (converted.Date - primary.Date).Days;
-            results.Add(new ZoneConversionResult(abbr, windowsId, converted, offset, dayDelta));
-        }
-
-        return new ConversionSnapshot(
-            effectiveWall,
-            utc,
-            primary,
-            primaryOffset,
-            results,
-            warning);
+        return CreateSnapshot(effectiveWall, utc, primaryTimeZone, targets, warning);
     }
 
     public static ConversionSnapshot ConvertLiveNow(
@@ -125,19 +86,60 @@ public static class TimeConversionService
     {
         var utc = DateTime.UtcNow;
         var inputWall = TimeZoneInfo.ConvertTimeFromUtc(utc, inputTimeZone);
-        var primary = TimeZoneInfo.ConvertTimeFromUtc(utc, primaryTimeZone);
-        var primaryOffset = primaryTimeZone.GetUtcOffset(primary);
+        return CreateSnapshot(inputWall, utc, primaryTimeZone, targets);
+    }
 
-        var results = new List<ZoneConversionResult>(targets.Count);
-        foreach (var (abbr, windowsId, zone) in targets)
+    private static DateTime ShiftOutOfGap(TimeZoneInfo zone, DateTime wall)
+    {
+        // Derive the actual jump: DST gaps can be half an hour or several hours.
+        var before = FindOutsideGap(zone, wall, -TimeSpan.TicksPerHour);
+        var after = FindOutsideGap(zone, wall, TimeSpan.TicksPerHour);
+        if (zone.IsInvalidTime(after))
+            return before; // No later wall time is representable at DateTime.MaxValue.
+
+        var gap = zone.GetUtcOffset(after) - zone.GetUtcOffset(before);
+        var shifted = AddClamped(wall, gap.Ticks);
+        return gap > TimeSpan.Zero && !zone.IsInvalidTime(shifted) ? shifted : after;
+    }
+
+    private static DateTime FindOutsideGap(TimeZoneInfo zone, DateTime wall, long stepTicks)
+    {
+        while (zone.IsInvalidTime(wall))
         {
-            var converted = TimeZoneInfo.ConvertTimeFromUtc(utc, zone);
-            var offset = zone.GetUtcOffset(converted);
-            var dayDelta = (converted.Date - primary.Date).Days;
-            results.Add(new ZoneConversionResult(abbr, windowsId, converted, offset, dayDelta));
+            var next = AddClamped(wall, stepTicks);
+            if (next == wall)
+                break;
+            wall = next;
         }
 
-        return new ConversionSnapshot(inputWall, utc, primary, primaryOffset, results);
+        return wall;
+    }
+
+    private static DateTime AddClamped(DateTime wall, long ticks) =>
+        new(Math.Clamp(wall.Ticks + ticks, DateTime.MinValue.Ticks, DateTime.MaxValue.Ticks), DateTimeKind.Unspecified);
+
+    private static ConversionSnapshot CreateSnapshot(
+        DateTime inputWall,
+        DateTime utc,
+        TimeZoneInfo primaryTimeZone,
+        IReadOnlyList<(string Abbreviation, string WindowsId, TimeZoneInfo Zone)> targets,
+        string? warning = null)
+    {
+        var primary = TimeZoneInfo.ConvertTimeFromUtc(utc, primaryTimeZone);
+        // An ambiguous wall time loses which occurrence was selected. UTC retains that information.
+        var primaryOffset = primaryTimeZone.GetUtcOffset(utc);
+
+        var results = new ZoneConversionResult[targets.Count];
+        for (var i = 0; i < targets.Count; i++)
+        {
+            var (abbr, windowsId, zone) = targets[i];
+            var converted = TimeZoneInfo.ConvertTimeFromUtc(utc, zone);
+            var offset = zone.GetUtcOffset(utc);
+            var dayDelta = (converted.Date - primary.Date).Days;
+            results[i] = new ZoneConversionResult(abbr, windowsId, converted, offset, dayDelta);
+        }
+
+        return new ConversionSnapshot(inputWall, utc, primary, primaryOffset, results, warning);
     }
 
     public static string FormatOffset(TimeSpan offset)

@@ -32,8 +32,6 @@ public sealed class MainForm : Form
     private readonly List<TargetZoneRow> _targetRows = [];
     private FlowLayoutPanel _targetListHost = null!;
     private Label _targetCountLabel = null!;
-    private string _lastCopyText = "";
-    private string _lastCopyOneLine = "";
     private ConversionSnapshot? _lastSnapshot;
 
     private List<TimezoneOption> _timezoneOptions = [];
@@ -163,7 +161,31 @@ public sealed class MainForm : Form
             if (_ready && WindowState == FormWindowState.Normal)
                 SaveWindowBounds();
         };
-        Application.ApplicationExit += (_, _) => PersistSettings();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _ready = false;
+            _liveTimer.Dispose();
+            _tips.Dispose();
+            _trayIcon?.Dispose();
+            _trayMenu?.Dispose();
+            _overlay?.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+
+    protected override void OnVisibleChanged(EventArgs e)
+    {
+        base.OnVisibleChanged(e);
+        if (!_ready)
+            return;
+
+        UpdateLiveBadge();
+        if (Visible)
+            RefreshDisplays();
     }
 
     private void ApplyAppIcon()
@@ -576,7 +598,7 @@ public sealed class MainForm : Form
         _reverseZoneRow.BackColor = cardFace;
         StyleCaption(_inputZoneCaption, "ENTER TIME IN THIS TIMEZONE");
         _reverseSourceTimezone.Font = UiTheme.BodyFont;
-        _reverseSourceTimezone.SelectedIndexChanged += OnReverseSourceChanged;
+        _reverseSourceTimezone.SelectedOptionChanged += OnReverseSourceChanged;
         _reverseZoneRow.Controls.Add(_inputZoneCaption);
         _reverseZoneRow.Controls.Add(_reverseSourceTimezone);
 
@@ -1045,11 +1067,15 @@ public sealed class MainForm : Form
                     ToggleFavorite(opt.WindowsId);
             });
 
+        var wasSuppressed = _suppressEvents;
         _suppressEvents = true;
         try
         {
             if (!string.IsNullOrWhiteSpace(selectWindowsId))
-                row.SelectWindowsId(selectWindowsId);
+            {
+                if (!row.SelectWindowsId(selectWindowsId))
+                    row.SelectAbbreviation("UTC");
+            }
             else if (!string.IsNullOrWhiteSpace(selectAbbreviation))
                 row.SelectAbbreviation(selectAbbreviation);
             else
@@ -1067,8 +1093,8 @@ public sealed class MainForm : Form
 
                 if (pick is not null)
                     row.SelectWindowsId(pick.WindowsId);
-                else if (row.Combo.Items.Count > 0)
-                    row.Combo.SelectedIndex = 0;
+                else if (row.Combo.Items.Count > 0 && row.Combo.Items[0] is TimezoneOption fallback)
+                    row.SelectWindowsId(fallback.WindowsId);
             }
 
             if (row.SelectedOption is TimezoneOption selected)
@@ -1076,7 +1102,7 @@ public sealed class MainForm : Form
         }
         finally
         {
-            _suppressEvents = false;
+            _suppressEvents = wasSuppressed;
         }
 
         _targetRows.Add(row);
@@ -1132,7 +1158,7 @@ public sealed class MainForm : Form
     {
         if (_liveBadge is not null)
             _liveBadge.IsLive = _liveMode;
-        _primaryClock.BlinkColons = _liveMode;
+        _primaryClock.BlinkColons = _liveMode && Visible;
     }
 
     private void SetupLiveTimer()
@@ -1140,12 +1166,11 @@ public sealed class MainForm : Form
         _liveTimer.Interval = 1000;
         _liveTimer.Tick += (_, _) =>
         {
-            if (!_liveMode || !_ready)
+            if (!_liveMode || !_ready || (!Visible && _overlay is not { Visible: true, IsDisposed: false }))
                 return;
-            SyncPickersToNow();
             RefreshDisplays();
         };
-        _liveTimer.Start();
+        _liveTimer.Enabled = _liveMode;
     }
 
     private void ApplyDirectionUi()
@@ -1246,7 +1271,6 @@ public sealed class MainForm : Form
         try
         {
             _liveModeCheck.Checked = true;
-            SyncPickersToNow();
             ApplyTimePickerFormat();
         }
         finally
@@ -1262,11 +1286,13 @@ public sealed class MainForm : Form
         UpdateLiveBadge();
 
         RefreshDisplays();
+        PersistSettings();
     }
 
     private void ExitLiveMode(bool fromUserToggle)
     {
         _liveMode = false;
+        _liveTimer.Stop();
         _useNowButton.Visible = true;
         _datePicker.Enabled = true;
         _timeEntry.Enabled = true;
@@ -1287,6 +1313,7 @@ public sealed class MainForm : Form
         }
 
         RefreshDisplays();
+        PersistSettings();
     }
 
     private void OnFormatChanged(object? sender, EventArgs e)
@@ -1316,6 +1343,11 @@ public sealed class MainForm : Form
     {
         if (!_ready || _suppressEvents)
             return;
+        if (sender is SearchableTimezoneBox combo)
+        {
+            var row = _targetRows.Find(r => ReferenceEquals(r.Combo, combo));
+            row?.RefreshFavoriteVisual(combo.SelectedOption is { } option && _settings.IsFavorite(option.WindowsId));
+        }
         RefreshDisplays();
         PersistSettings();
     }
@@ -1368,15 +1400,18 @@ public sealed class MainForm : Form
 
     private void CopyResults(bool oneLine)
     {
-        if (string.IsNullOrWhiteSpace(_lastCopyText) && string.IsNullOrWhiteSpace(_lastCopyOneLine))
+        if (_liveMode || _lastSnapshot is null)
             RefreshDisplays();
 
-        var text = oneLine ? _lastCopyOneLine : _lastCopyText;
-        if (string.IsNullOrWhiteSpace(text))
+        if (_lastSnapshot is null)
         {
             MessageBox.Show(this, "Nothing to copy yet.", "ZoneShift", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
+
+        var text = oneLine
+            ? TimeConversionService.FormatCopyOneLine(_lastSnapshot, Use24Hour, _liveMode)
+            : TimeConversionService.FormatCopyMultiline(_lastSnapshot, Use24Hour, _liveMode);
 
         try
         {
@@ -1415,6 +1450,8 @@ public sealed class MainForm : Form
         {
             var version = typeof(MainForm).Assembly.GetName().Version?.ToString(3) ?? "1.5.0";
             var result = await UpdateChecker.CheckAsync(version);
+            if (IsDisposed || Disposing)
+                return;
             if (!result.UpdateAvailable)
             {
                 MessageBox.Show(this, result.Message, "ZoneShift", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -1475,6 +1512,8 @@ public sealed class MainForm : Form
 
             var progress = new Progress<string>(msg =>
             {
+                if (IsDisposed || Disposing)
+                    return;
                 _statusLabel.Text = msg;
                 _statusLabel.ForeColor = UiTheme.TextSecondary;
             });
@@ -1489,10 +1528,16 @@ public sealed class MainForm : Form
         catch (Exception ex)
         {
             AppLog.Error("Update check/install UI failed", ex);
+            if (IsDisposed || Disposing)
+                return;
             _statusLabel.Text = "Update failed - see logs.";
             _statusLabel.ForeColor = UiTheme.Danger;
             MessageBox.Show(this, $"Update failed:\n{ex.Message}", "ZoneShift", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            SetUpdateUiBusy(false);
+        }
+        finally
+        {
+            if (!IsDisposed && !Disposing)
+                SetUpdateUiBusy(false);
         }
     }
 
@@ -1533,6 +1578,12 @@ public sealed class MainForm : Form
             _overlayCheck.Checked = _settings.OverlayVisible;
             _closeToTrayCheck.Checked = _settings.CloseToTray;
 
+            if (string.IsNullOrWhiteSpace(_settings.ReverseSourceWindowsId) ||
+                !_reverseSourceTimezone.SelectWindowsId(_settings.ReverseSourceWindowsId!))
+            {
+                _reverseSourceTimezone.SelectAbbreviation("IST");
+            }
+
             _liveMode = _settings.LiveMode;
             _liveModeCheck.Checked = _liveMode;
             _datePicker.Enabled = !_liveMode;
@@ -1542,12 +1593,6 @@ public sealed class MainForm : Form
                 SyncPickersToNow();
             ApplyTimePickerFormat();
             UpdateLiveBadge();
-
-            if (string.IsNullOrWhiteSpace(_settings.ReverseSourceWindowsId) ||
-                !_reverseSourceTimezone.SelectWindowsId(_settings.ReverseSourceWindowsId!))
-            {
-                _reverseSourceTimezone.SelectAbbreviation("IST");
-            }
 
             RebuildTargetRowsFromSettings();
         }
@@ -1596,6 +1641,8 @@ public sealed class MainForm : Form
         var saved = (_settings.TargetWindowsIds ?? Array.Empty<string?>())
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Select(id => id!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(MaxTargetZones)
             .ToList();
 
         if (saved.Count == 0)
@@ -1660,10 +1707,11 @@ public sealed class MainForm : Form
         });
     }
 
-    private void SyncPickersToNow()
+    private void SyncPickersToNow(DateTime? inputWallTime = null)
     {
-        var nowInInputZone = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, GetInputTimezone());
+        var nowInInputZone = inputWallTime ?? TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, GetInputTimezone());
 
+        var wasSuppressed = _suppressEvents;
         _suppressEvents = true;
         try
         {
@@ -1680,7 +1728,7 @@ public sealed class MainForm : Form
         }
         finally
         {
-            _suppressEvents = false;
+            _suppressEvents = wasSuppressed;
         }
     }
 
@@ -1915,14 +1963,14 @@ public sealed class MainForm : Form
 
     private void RefreshDisplays()
     {
-        if (_suppressEvents)
+        if (_suppressEvents || IsDisposed || Disposing)
             return;
 
         try
         {
             var inputTz = GetInputTimezone();
-            var targets = new List<(string Abbreviation, string WindowsId, TimeZoneInfo Zone)>();
-            var rowMap = new List<TargetZoneRow?>();
+            var targets = new List<(string Abbreviation, string WindowsId, TimeZoneInfo Zone)>(_targetRows.Count);
+            var rowMap = new List<TargetZoneRow>(_targetRows.Count);
 
             foreach (var row in _targetRows)
             {
@@ -1932,7 +1980,6 @@ public sealed class MainForm : Form
                     row.Clock.ZoneText = "---";
                     row.Clock.CaptionText = "";
                     row.Meta.Text = string.Empty;
-                    rowMap.Add(null);
                     continue;
                 }
 
@@ -1944,6 +1991,7 @@ public sealed class MainForm : Form
             if (_liveMode)
             {
                 snapshot = TimeConversionService.ConvertLiveNow(inputTz, _localTimezone, targets);
+                SyncPickersToNow(snapshot.InputWallTime);
             }
             else
             {
@@ -1953,43 +2001,39 @@ public sealed class MainForm : Form
 
             var primaryTime = snapshot.PrimaryLocalTime;
             var localOffset = snapshot.PrimaryUtcOffset;
+            var primaryTimeText = FormatDigitalTime(primaryTime);
 
             _primaryClock.ZoneText = "LOCAL";
-            _primaryClock.TimeText = FormatDigitalTime(primaryTime);
+            _primaryClock.TimeText = primaryTimeText;
             _primaryClock.CaptionText = _liveMode
                 ? $"{primaryTime:ddd d MMM}  {TimeConversionService.FormatOffset(localOffset)}  LIVE"
                 : $"{primaryTime:ddd d MMM}  {TimeConversionService.FormatOffset(localOffset)}";
 
-            var overlayZones = new List<(string label, string time, string meta)>();
-            var resultIndex = 0;
+            var overlayZones = _overlay is { Visible: true, IsDisposed: false }
+                ? new List<(string label, string time, string meta)>(rowMap.Count)
+                : null;
             for (var i = 0; i < rowMap.Count; i++)
             {
                 var row = rowMap[i];
-                if (row is null)
-                    continue;
-
-                var r = snapshot.Targets[resultIndex++];
+                var r = snapshot.Targets[i];
                 var dayNote = TimeConversionService.FormatDayDelta(r.DayDeltaFromPrimary);
-                var meta = string.IsNullOrEmpty(dayNote)
-                    ? TimeConversionService.FormatOffset(r.UtcOffset)
-                    : $"{TimeConversionService.FormatOffset(r.UtcOffset)}{dayNote}";
+                var meta = TimeConversionService.FormatOffset(r.UtcOffset) + dayNote;
+                var timeText = FormatDigitalTime(r.LocalWallTime);
 
-                row.Clock.TimeText = FormatDigitalTime(r.LocalWallTime);
+                row.Clock.TimeText = timeText;
                 row.Clock.ZoneText = r.Abbreviation;
                 row.Clock.CaptionText = meta;
                 row.Meta.Text = meta;
-                overlayZones.Add((r.Abbreviation, FormatDigitalTime(r.LocalWallTime), meta));
+                overlayZones?.Add((r.Abbreviation, timeText, meta));
             }
 
-            if (_overlay is { Visible: true, IsDisposed: false })
+            if (overlayZones is not null && _overlay is { Visible: true, IsDisposed: false })
             {
                 var overlayCaption = _liveMode ? "Your time - live" : "Your time - custom";
-                _overlay.UpdateDisplay(FormatDigitalTime(primaryTime), overlayCaption, overlayZones);
+                _overlay.UpdateDisplay(primaryTimeText, overlayCaption, overlayZones);
             }
 
             _lastSnapshot = snapshot;
-            _lastCopyText = TimeConversionService.FormatCopyMultiline(snapshot, Use24Hour, _liveMode);
-            _lastCopyOneLine = TimeConversionService.FormatCopyOneLine(snapshot, Use24Hour, _liveMode);
 
             var mode = Use24Hour ? "24-hour" : "12-hour";
             if (!string.IsNullOrWhiteSpace(snapshot.Warning))
@@ -2011,6 +2055,7 @@ public sealed class MainForm : Form
         }
         catch (Exception ex)
         {
+            _lastSnapshot = null;
             AppLog.Error("RefreshDisplays failed", ex);
             _statusLabel.Text = $"Could not convert: {ex.Message}";
             _statusLabel.ForeColor = UiTheme.Danger;
@@ -2020,5 +2065,3 @@ public sealed class MainForm : Form
     private string FormatDigitalTime(DateTime time) =>
         TimeConversionService.FormatDigital(time, Use24Hour, includeSeconds: _liveMode);
 }
-
-

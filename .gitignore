@@ -3,10 +3,16 @@ bin/
 obj/
 publish/
 dist/
+android/.gradle/
+android/**/build/
 **/TestResults/
 *.user
 *.suo
+*.iml
 .vs/
+
+## Android local configuration
+android/local.properties
 
 ## OS
 Thumbs.db
