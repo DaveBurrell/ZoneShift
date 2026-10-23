@@ -22,6 +22,45 @@ internal static class UiPaint
         g.FillRectangle(b, bounds);
     }
 
+    /// <summary>Disabled fields sit on a muted surface so they read as unavailable.</summary>
+    public static Color FieldFill(bool enabled) => enabled ? UiTheme.InputBack : UiTheme.SegmentIdle;
+
+    /// <summary>
+    /// Input chrome shared by every text field with a drop button: fill, a border that takes the
+    /// accent while focused, and the button cell. The caller draws the button glyph.
+    /// </summary>
+    public static void PaintFieldChrome(Graphics g, Size size, Rectangle button, bool enabled, bool focused, bool buttonHot)
+    {
+        FillGutter(g, new Rectangle(Point.Empty, size), FieldFill(enabled));
+
+        if (enabled && buttonHot)
+        {
+            using var hot = new SolidBrush(UiTheme.AccentSoft);
+            g.FillRectangle(hot, button);
+        }
+
+        using (var divider = new Pen(UiTheme.InputBorder))
+            g.DrawLine(divider, button.Left - 1, 2, button.Left - 1, size.Height - 3);
+
+        var border = !enabled ? UiTheme.CardBorder : focused ? UiTheme.Accent : UiTheme.InputBorder;
+        using var pen = new Pen(border);
+        g.DrawRectangle(pen, 0, 0, size.Width - 1, size.Height - 1);
+    }
+
+    public static void DrawChevronDown(Graphics g, Rectangle area, Color color)
+    {
+        var cx = area.Left + area.Width / 2f;
+        var cy = area.Top + area.Height / 2f;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using var pen = new Pen(color, 1.6f)
+        {
+            StartCap = System.Drawing.Drawing2D.LineCap.Round,
+            EndCap = System.Drawing.Drawing2D.LineCap.Round,
+            LineJoin = System.Drawing.Drawing2D.LineJoin.Round
+        };
+        g.DrawLines(pen, [new PointF(cx - 4, cy - 2), new PointF(cx, cy + 2), new PointF(cx + 4, cy - 2)]);
+    }
+
     public static void FillRoundRect(Graphics g, Brush brush, Rectangle rect, int radius)
     {
         if (rect.Width < 2 || rect.Height < 2)

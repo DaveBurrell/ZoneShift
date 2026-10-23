@@ -103,4 +103,17 @@ public sealed class AppSettingsTests : IDisposable
         new AppSettings { OverlayOpacity = 12.0 }.Save();
         Assert.Equal(0.94, AppSettings.Load().OverlayOpacity, precision: 5);
     }
+
+    [Fact]
+    public void Saving_replaces_the_file_whole_and_keeps_the_previous_one_as_backup()
+    {
+        var settings = new AppSettings { TargetWindowsIds = ["UTC"] };
+        settings.Save();
+        settings.TargetWindowsIds = ["Tokyo Standard Time"];
+        settings.Save();
+
+        Assert.Equal(["Tokyo Standard Time"], AppSettings.Load().TargetWindowsIds!);
+        Assert.Contains("\"UTC\"", File.ReadAllText(Path.Combine(_scratchDir, "settings.bak.json")));
+        Assert.Empty(Directory.GetFiles(_scratchDir, "*.tmp"));
+    }
 }

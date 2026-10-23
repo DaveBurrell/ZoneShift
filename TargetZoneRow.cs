@@ -104,6 +104,7 @@ internal sealed class TargetZoneRow
             Size = new Size(innerW, comboH)
         };
         Combo.SetOptions(options, favorites);
+        Combo.FieldLabel = "Clock timezone";
         Combo.SelectedOptionChanged += (_, _) => SyncZoneLabel();
         Combo.SelectedOptionChanged += onChanged;
 
@@ -127,7 +128,6 @@ internal sealed class TargetZoneRow
         IndexBadge.ForeColor = UiTheme.TextSecondary;
         IndexBadge.BackColor = UiTheme.TileBack;
         _led.GutterColor = UiTheme.TileBack;
-        UiTheme.StyleInput(Combo);
         UiTheme.StyleDangerButton(RemoveButton);
         RefreshFavoriteVisual(string.Equals(FavoriteButton.Text, "*", StringComparison.Ordinal));
         Root.Invalidate(true);

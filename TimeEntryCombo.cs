@@ -4,73 +4,24 @@ using TimezoneConverter.Services;
 namespace TimezoneConverter;
 
 /// <summary>
-/// Editable time field: pick a preset from 30-minute steps, or type any time.
+/// Editable time field: type any time, pick a 30-minute preset from the list, or step with the
+/// arrow keys / wheel. Typed text commits on Enter or when focus leaves; unreadable text reverts.
 /// </summary>
-internal sealed class TimeEntryCombo : ComboBox
+internal sealed class TimeEntryCombo : DropDownField
 {
+    private const int PresetMinutes = 30;
+    private const int PresetCount = 24 * 60 / PresetMinutes;
+
     private TimeSpan _timeOfDay;
     private bool _use24Hour;
     private bool _includeSeconds;
-    private bool _suppress;
-    private bool _presetsInitialized;
-    private bool _handlingSelection;
-    private bool _presetsDirty;
+    private bool _configured;
 
     public event EventHandler? TimeChanged;
 
     public TimeEntryCombo()
     {
-        DropDownStyle = ComboBoxStyle.DropDown; // allows typing
-        IntegralHeight = false;
-        MaxDropDownItems = 12;
-        FlatStyle = FlatStyle.Flat;
-        AutoCompleteMode = AutoCompleteMode.SuggestAppend;
-        AutoCompleteSource = AutoCompleteSource.ListItems;
-        BackColor = UiTheme.InputBack;
-        ForeColor = UiTheme.TextPrimary;
-
-        // Selecting a 30-minute preset from the list
-        SelectionChangeCommitted += (_, _) =>
-        {
-            if (_suppress)
-                return;
-
-            _handlingSelection = true;
-            try
-            {
-                // The edit text can still describe the previous selection during
-                // the native notification. Read the selected list item directly.
-                var index = SelectedIndex;
-                if (index >= 0 && index < Items.Count &&
-                    TryParse(GetItemText(Items[index]), out var t))
-                    SetTimeInternal(t, raiseEvent: true, updateText: true);
-            }
-            finally
-            {
-                _handlingSelection = false;
-                if (_presetsDirty && !IsDisposed && !Disposing)
-                {
-                    // A TimeChanged subscriber can change the format. Wait until
-                    // the native selection notification has finished to replace items.
-                    if (IsHandleCreated)
-                        BeginInvoke((Action)RefreshPendingPresets);
-                    else
-                        RefreshPendingPresets();
-                }
-            }
-        };
-
-        // Commit typed values when focus leaves or Enter is pressed
-        Leave += (_, _) => CommitTypedText();
-        KeyDown += (_, e) =>
-        {
-            if (e.KeyCode == Keys.Enter)
-            {
-                CommitTypedText();
-                e.SuppressKeyPress = true;
-            }
-        };
-
+        Popup.MaxVisibleRows = 12;
         Configure(use24Hour: false, includeSeconds: false);
     }
 
@@ -79,7 +30,7 @@ internal sealed class TimeEntryCombo : ComboBox
     public TimeSpan TimeOfDay
     {
         get => _timeOfDay;
-        set => SetTimeInternal(value, raiseEvent: false, updateText: true);
+        set => SetTimeInternal(value, raiseEvent: false);
     }
 
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
@@ -98,111 +49,151 @@ internal sealed class TimeEntryCombo : ComboBox
         set => Configure(_use24Hour, value);
     }
 
+    /// <summary>True while the editor holds text that differs from the committed time.</summary>
+    [Browsable(false)]
+    public bool IsEditing => Editor.Text != FormatTime(_timeOfDay, _includeSeconds);
+
     public void Configure(bool use24Hour, bool includeSeconds)
     {
-        var rebuild = !_presetsInitialized || _use24Hour != use24Hour;
-        if (!rebuild && _includeSeconds == includeSeconds)
+        if (_configured && _use24Hour == use24Hour && _includeSeconds == includeSeconds)
             return;
 
+        // A half-typed time survives a format switch; it is re-read on commit.
+        var keepTypedText = _configured && IsEditing;
+        _configured = true;
         _use24Hour = use24Hour;
         _includeSeconds = includeSeconds;
-        if (rebuild)
-            RebuildPresets();
-        UpdateDisplayText();
+        if (!keepTypedText)
+            UpdateDisplayText();
+        if (IsDroppedDown)
+            ShowPresets();
     }
 
-    public void RebuildPresets()
+    /// <summary>The 30-minute presets in the current format.</summary>
+    internal IReadOnlyList<string> Presets =>
+        Enumerable.Range(0, PresetCount)
+            .Select(i => FormatTime(TimeSpan.FromMinutes(i * PresetMinutes), includeSeconds: false))
+            .ToArray();
+
+    protected override bool OnEditorKey(KeyEventArgs e)
     {
-        if (_handlingSelection)
+        switch (e.KeyCode)
         {
-            _presetsDirty = true;
-            return;
-        }
+            case Keys.Enter:
+                if (IsDroppedDown && Popup.HighlightIndex >= 0)
+                    OnPopupItemChosen(Popup.HighlightIndex);
+                else
+                    CommitTypedText();
+                return true;
 
-        var presets = new object[48];
-        for (var index = 0; index < presets.Length; index++)
-            presets[index] = FormatTime(TimeSpan.FromMinutes(index * 30), includeSeconds: false);
+            case Keys.Escape when IsDroppedDown:
+                HidePopup();
+                return true;
 
-        var wasSuppressed = _suppress;
-        _suppress = true;
-        BeginUpdate();
-        try
-        {
-            var previous = Text;
-            // Clear the native selection before the managed collection changes.
-            SelectedIndex = -1;
-            Items.Clear();
-            Items.AddRange(presets);
-            _presetsInitialized = true;
-            _presetsDirty = false;
-
-            // Restore typed/selected text if possible
-            if (!string.IsNullOrWhiteSpace(previous))
-                Text = previous;
-            else
+            case Keys.Escape when IsEditing:
                 UpdateDisplayText();
-        }
-        finally
-        {
-            EndUpdate();
-            _suppress = wasSuppressed;
+                Editor.SelectAll();
+                return true;
+
+            case Keys.Up or Keys.Down:
+                var direction = e.KeyCode == Keys.Up ? 1 : -1;
+                if (IsDroppedDown)
+                    Popup.MoveHighlight(-direction);
+                else
+                    Step(direction);
+                return true;
+
+            case Keys.PageUp or Keys.PageDown:
+                var page = e.KeyCode == Keys.PageUp ? 1 : -1;
+                if (IsDroppedDown)
+                    Popup.MoveHighlight(-page * Popup.PageSize);
+                else
+                    StepHours(page);
+                return true;
+
+            default:
+                return false;
         }
     }
 
-    private void RefreshPendingPresets()
+    protected override void OnEditorWheel(int direction) => Step(direction);
+
+    // Typing means "this time", not a preset: close the list so Enter commits the typed text.
+    protected override void OnEditorTextEdited() => HidePopup();
+
+    protected override void OnDropButtonClicked()
     {
-        if (!_presetsDirty || IsDisposed || Disposing)
+        CommitTypedText();
+        Editor.SelectAll();
+        ShowPresets();
+    }
+
+    protected override void OnPopupItemChosen(int index)
+    {
+        if (index < 0 || index >= PresetCount)
             return;
-        RebuildPresets();
-        UpdateDisplayText();
+
+        HidePopup();
+        SetTimeInternal(TimeSpan.FromMinutes(index * PresetMinutes), raiseEvent: true, forceText: true);
+        if (Editor.Focused)
+            Editor.SelectAll();
+    }
+
+    protected override void OnFieldLeave() => CommitTypedText();
+
+    private void ShowPresets()
+    {
+        var nearest = (int)(_timeOfDay.TotalMinutes / PresetMinutes);
+        Popup.SetItems(Presets.Select(p => new PopupItem(p)).ToArray(), nearest, center: true);
+        ShowPopup();
+    }
+
+    /// <summary>Moves to the next (or previous) half hour: 7:45 steps to 8:00 or 7:30.</summary>
+    private void Step(int direction)
+    {
+        CommitTypedText();
+        var slot = _timeOfDay.TotalMinutes / PresetMinutes;
+        var next = direction > 0 ? Math.Floor(slot) + 1 : Math.Ceiling(slot) - 1;
+        SetTimeInternal(TimeSpan.FromMinutes(next * PresetMinutes), raiseEvent: true, forceText: true);
+        Editor.SelectAll();
+    }
+
+    private void StepHours(int hours)
+    {
+        CommitTypedText();
+        var minutes = Math.Floor(_timeOfDay.TotalMinutes);
+        SetTimeInternal(TimeSpan.FromMinutes(minutes + hours * 60), raiseEvent: true, forceText: true);
+        Editor.SelectAll();
     }
 
     private void CommitTypedText()
     {
-        if (_suppress)
+        if (!IsEditing)
             return;
 
-        if (TryParse(Text, out var t))
-        {
-            SetTimeInternal(t, raiseEvent: true, updateText: true);
-        }
+        if (TryParse(Editor.Text, out var t))
+            SetTimeInternal(t, raiseEvent: true, forceText: true);
         else
-        {
-            // Revert invalid input to last known good time
-            UpdateDisplayText();
-        }
+            UpdateDisplayText(); // Revert unreadable input to the last good time.
     }
 
-    private void SetTimeInternal(TimeSpan time, bool raiseEvent, bool updateText)
+    private void SetTimeInternal(TimeSpan time, bool raiseEvent, bool forceText = false)
     {
-        time = Normalize(time);
+        time = TimeParser.Normalize(time);
         var changed = time != _timeOfDay;
+        // Programmatic updates (the live clock) never overwrite a time the user is still typing,
+        // including while the window is inactive and the editor has lost real focus.
+        var keepTypedText = !forceText && IsEditing;
         _timeOfDay = time;
 
-        if (updateText)
+        if (!keepTypedText)
             UpdateDisplayText();
 
         if (changed && raiseEvent)
             TimeChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private void UpdateDisplayText()
-    {
-        var display = FormatTime(_timeOfDay, _includeSeconds);
-        if (Text == display)
-            return;
-
-        var wasSuppressed = _suppress;
-        _suppress = true;
-        try
-        {
-            Text = display;
-        }
-        finally
-        {
-            _suppress = wasSuppressed;
-        }
-    }
+    private void UpdateDisplayText() => SetEditorText(FormatTime(_timeOfDay, _includeSeconds));
 
     private string FormatTime(TimeSpan time, bool includeSeconds) =>
         TimeParser.Format(time, _use24Hour, includeSeconds);
@@ -212,6 +203,4 @@ internal sealed class TimeEntryCombo : ComboBox
     /// </summary>
     public static bool TryParse(string? text, out TimeSpan time) =>
         TimeParser.TryParse(text, out time);
-
-    private static TimeSpan Normalize(TimeSpan t) => TimeParser.Normalize(t);
 }

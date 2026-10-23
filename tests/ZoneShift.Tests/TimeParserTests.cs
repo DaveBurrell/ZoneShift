@@ -23,6 +23,14 @@ public class TimeParserTests
     [InlineData("12pm", 12, 0)]
     [InlineData("23", 23, 0)]
     [InlineData("7", 7, 0)]
+    [InlineData("7 a.m.", 7, 0)]
+    [InlineData("7:30 p.m.", 19, 30)]
+    [InlineData("7p", 19, 0)]
+    [InlineData("11a", 11, 0)]
+    [InlineData("7.30", 7, 30)]
+    [InlineData("noon", 12, 0)]
+    [InlineData("12 noon", 12, 0)]
+    [InlineData("Midnight", 0, 0)]
     public void TryParse_valid_inputs(string input, int hour, int minute)
     {
         Assert.True(TimeParser.TryParse(input, out var time));
@@ -52,6 +60,11 @@ public class TimeParserTests
     [InlineData("2026-09-13")]
     [InlineData("9/13/2026 7:30 PM")]
     [InlineData("99999999999999999999999999")]
+    [InlineData("7.3")]
+    [InlineData("1.5pm")]
+    [InlineData("p.m.")]
+    [InlineData("a")]
+    [InlineData("13 noon")]
     public void TryParse_invalid_inputs(string? input)
     {
         Assert.False(TimeParser.TryParse(input, out _));

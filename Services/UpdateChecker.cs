@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace TimezoneConverter.Services;
@@ -11,7 +12,8 @@ public sealed record UpdateCheckResult(
     string? ReleaseUrl,
     string? SetupDownloadUrl,
     string? SetupFileName,
-    string? Message);
+    string? Message,
+    string? SetupSha256 = null);
 
 /// <summary>
 /// Checks GitHub Releases and downloads the matching setup for silent install.
@@ -21,12 +23,22 @@ public static class UpdateChecker
     private const string LatestApi =
         "https://api.github.com/repos/DaveBurrell/ZoneShift/releases/latest";
 
+    /// <summary>Installers are only ever taken from this repository's release downloads.</summary>
+    private const string ReleaseDownloadPrefix = "/DaveBurrell/ZoneShift/releases/download/";
+
+    private static readonly TimeSpan ApiTimeout = TimeSpan.FromSeconds(20);
+
+    // HttpClient.Timeout stops applying once headers arrive, so the body read has its own limit.
+    private static readonly TimeSpan DownloadTimeout = TimeSpan.FromMinutes(10);
+
+    // The download can legitimately take minutes; the API call gets its own short timeout.
     private static readonly HttpClient Http = CreateClient();
 
     private static HttpClient CreateClient()
     {
         var c = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
-        c.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("ZoneShift", "1.4"));
+        var version = typeof(UpdateChecker).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+        c.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("ZoneShift", version));
         c.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         return c;
     }
@@ -43,17 +55,19 @@ public static class UpdateChecker
     public static async Task<UpdateCheckResult> CheckAsync(string currentVersion, CancellationToken ct = default)
     {
         currentVersion = NormalizeVersion(currentVersion);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(ApiTimeout);
         try
         {
-            using var response = await Http.GetAsync(LatestApi, ct).ConfigureAwait(false);
+            using var response = await Http.GetAsync(LatestApi, timeout.Token).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
                 return new UpdateCheckResult(false, currentVersion, null, null, null, null,
                     $"Update check failed (HTTP {(int)response.StatusCode}).");
             }
 
-            await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
+            await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: timeout.Token).ConfigureAwait(false);
             var root = doc.RootElement;
 
             var tag = root.TryGetProperty("tag_name", out var tagEl) ? tagEl.GetString() : null;
@@ -64,7 +78,7 @@ public static class UpdateChecker
                 return new UpdateCheckResult(false, currentVersion, null, htmlUrl, null, null,
                     "Could not read latest version.");
 
-            var (setupUrl, setupName) = PickSetupAssetFromRelease(root, CurrentArchitectureLabel);
+            var (setupUrl, setupName, setupSha256) = PickSetupAssetFromRelease(root, CurrentArchitectureLabel);
             var newer = CompareVersions(latest, currentVersion) > 0;
 
             return new UpdateCheckResult(
@@ -76,7 +90,18 @@ public static class UpdateChecker
                 setupName,
                 newer
                     ? $"Version {latest} is available (you have {currentVersion})."
-                    : $"You are on the latest version ({currentVersion}).");
+                    : $"You are on the latest version ({currentVersion}).",
+                setupSha256);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            AppLog.Warn("Update check timed out.");
+            return new UpdateCheckResult(false, currentVersion, null, null, null, null,
+                "Update check timed out. Try again later.");
         }
         catch (Exception ex)
         {
@@ -87,14 +112,43 @@ public static class UpdateChecker
     }
 
     /// <summary>
-    /// Downloads the setup EXE and launches a silent install, then exits the app.
+    /// True for an https URL under this repository's GitHub release downloads. GitHub then
+    /// redirects to its asset CDN, which <see cref="IsTrustedDownloadHost"/> covers.
+    /// </summary>
+    public static bool IsTrustedReleaseUrl(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
+        uri.Scheme == Uri.UriSchemeHttps &&
+        uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase) &&
+        uri.AbsolutePath.StartsWith(ReleaseDownloadPrefix, StringComparison.Ordinal) &&
+        string.IsNullOrEmpty(uri.UserInfo);
+
+    private static bool IsTrustedDownloadHost(Uri? uri) =>
+        uri is not null &&
+        uri.Scheme == Uri.UriSchemeHttps &&
+        (uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase) ||
+         uri.Host.EndsWith(".githubusercontent.com", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Downloads the setup EXE, verifies it against the SHA-256 digest GitHub publishes for the
+    /// asset, and launches a silent install. The caller exits the app afterwards.
+    /// <para>
+    /// The installer runs silently and possibly elevated, so it only runs when it came from this
+    /// repository over https, matches its digest, and has been held open since it was verified,
+    /// in a fresh private folder, so nothing can swap it before it starts.
+    /// </para>
     /// </summary>
     public static async Task InstallUpdateAsync(
         string setupDownloadUrl,
         string? preferredFileName,
+        string? expectedSha256,
         IProgress<string>? status,
         CancellationToken ct = default)
     {
+        if (!IsTrustedReleaseUrl(setupDownloadUrl))
+            throw new InvalidOperationException("The update download is not a ZoneShift release on GitHub.");
+        if (!IsSha256Hex(expectedSha256))
+            throw new InvalidOperationException("The release does not publish a checksum for its installer.");
+
         var fileName = string.IsNullOrWhiteSpace(preferredFileName)
             ? "ZoneShift-Setup.exe"
             : preferredFileName;
@@ -103,15 +157,48 @@ public static class UpdateChecker
         foreach (var c in Path.GetInvalidFileNameChars())
             fileName = fileName.Replace(c, '_');
 
-        var tempPath = Path.Combine(Path.GetTempPath(), fileName);
+        var folder = Directory.CreateTempSubdirectory("ZoneShift-update-");
+        var tempPath = Path.Combine(folder.FullName, fileName);
         status?.Report("Downloading update...");
         AppLog.Info($"Downloading update from {setupDownloadUrl} -> {tempPath}");
 
-        await using (var remote = await Http.GetStreamAsync(setupDownloadUrl, ct).ConfigureAwait(false))
-        await using (var local = File.Create(tempPath))
+        FileStream? locked = null;
+        try
         {
-            await remote.CopyToAsync(local, ct).ConfigureAwait(false);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(DownloadTimeout);
+            using (var response = await Http.GetAsync(
+                       setupDownloadUrl, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false))
+            {
+                response.EnsureSuccessStatusCode();
+                if (!IsTrustedDownloadHost(response.RequestMessage?.RequestUri))
+                    throw new InvalidOperationException("The update download was redirected to an unexpected host.");
+
+                await using var remote = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
+                await using var local = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                await remote.CopyToAsync(local, timeout.Token).ConfigureAwait(false);
+            }
+
+            // Hold the verified file open, denying writers, until the installer process has started.
+            locked = new FileStream(tempPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var actual = Convert.ToHexString(await SHA256.HashDataAsync(locked, ct).ConfigureAwait(false));
+            if (!actual.Equals(expectedSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                AppLog.Error($"Update checksum mismatch: expected {expectedSha256}, got {actual}.");
+                throw new InvalidOperationException("The downloaded update failed its checksum and was not installed.");
+            }
         }
+        catch
+        {
+            // Never leave a partial or unverified installer behind.
+            locked?.Dispose();
+            try { folder.Delete(recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            throw;
+        }
+
+        await using var _ = locked;
 
         status?.Report("Installing update (ZoneShift will reopen)...");
         AppLog.Info($"Launching silent installer: {tempPath}");
@@ -134,22 +221,41 @@ public static class UpdateChecker
         AppLog.Info($"Installer process started (pid={proc.Id}). App will exit so install can finish.");
     }
 
-    private static (string? Url, string? Name) PickSetupAssetFromRelease(JsonElement root, string arch)
+    /// <summary>
+    /// Picks the installer for <paramref name="arch"/> from a GitHub release JSON object, with the
+    /// SHA-256 from the asset's <c>digest</c> ("sha256:" + hex). Assets outside this
+    /// repository's release downloads are ignored.
+    /// </summary>
+    internal static (string? Url, string? Name, string? Sha256) PickSetupAssetFromRelease(JsonElement root, string arch)
     {
         if (!root.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array)
-            return (null, null);
+            return (null, null, null);
 
         var list = new List<(string Name, string Url)>();
+        var digests = new Dictionary<string, string?>(StringComparer.Ordinal);
         foreach (var asset in assets.EnumerateArray())
         {
             var name = asset.TryGetProperty("name", out var n) ? n.GetString() : null;
             var url = asset.TryGetProperty("browser_download_url", out var u) ? u.GetString() : null;
-            if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(url))
-                list.Add((name, url));
+            if (string.IsNullOrWhiteSpace(name) || url is null || !IsTrustedReleaseUrl(url))
+                continue;
+
+            list.Add((name, url));
+            var digest = asset.TryGetProperty("digest", out var d) && d.ValueKind == JsonValueKind.String
+                ? d.GetString()
+                : null;
+            digests[url] = digest is not null && digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase)
+                ? digest["sha256:".Length..]
+                : null;
         }
 
-        return PickSetupAsset(list, arch);
+        var (pickedUrl, pickedName) = PickSetupAsset(list, arch);
+        var sha = pickedUrl is not null && digests.TryGetValue(pickedUrl, out var hex) && IsSha256Hex(hex) ? hex : null;
+        return (pickedUrl, pickedName, sha);
     }
+
+    private static bool IsSha256Hex(string? value) =>
+        value is { Length: 64 } && value.All(Uri.IsHexDigit);
 
     /// <summary>Public for unit tests — pick setup asset name/url for an architecture.</summary>
     public static (string? Url, string? Name) PickSetupAsset(

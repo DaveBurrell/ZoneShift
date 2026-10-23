@@ -14,7 +14,7 @@ public sealed class MainForm : Form
     private readonly Label _inputZoneCaption = new();
     private readonly Label _dateFieldCaption = new();
     private readonly Label _timeFieldCaption = new();
-    private readonly InputHostPanel _reverseZoneRow = new();
+    private readonly Panel _reverseZoneRow = new();
     private Panel _sourceWrap = null!;
     private readonly SearchableTimezoneBox _reverseSourceTimezone = new();
     private readonly ThemedDateBox _datePicker = new();
@@ -68,6 +68,9 @@ public sealed class MainForm : Form
     private bool _shownTrayTip;
 
     private bool _suppressEvents;
+    // Set when committing a field ended live mode because focus moved onto the live check box:
+    // the click that moved focus is about to toggle the box back on, and must not.
+    private bool _ignoreLiveRecheck;
     private bool _ready;
     private bool _liveMode = true;
     /// <summary>True after target zone combos have been restored from disk (safe to persist zones).</summary>
@@ -134,9 +137,9 @@ public sealed class MainForm : Form
             RefreshFavoriteVisuals();
             RefreshDisplays();
 
-            // The focused combo selects its whole text, which paints as a full-width highlight
-            // block. Collapse it so the field reads as a value, not a selection.
-            _reverseSourceTimezone.SelectionLength = 0;
+            // Start with no field focused. Activation would otherwise focus the first input, which
+            // selects its whole text and paints it as a highlight block before the user acts.
+            ActiveControl = null;
             // Do NOT PersistSettings here — combos may not be fully selected yet and
             // would overwrite good on-disk zone lists with incomplete UI state.
             // Window bounds only (non-destructive):
@@ -154,6 +157,7 @@ public sealed class MainForm : Form
                 BeginInvoke(() => ShowOnboarding(force: false));
         };
 
+        SingleInstance.ActivationRequested += OnActivationRequested;
         FormClosing += OnFormClosing;
         Resize += OnFormResize;
         LocationChanged += (_, _) =>
@@ -168,6 +172,7 @@ public sealed class MainForm : Form
         if (disposing)
         {
             _ready = false;
+            SingleInstance.ActivationRequested -= OnActivationRequested;
             _liveTimer.Dispose();
             _tips.Dispose();
             _trayIcon?.Dispose();
@@ -320,6 +325,20 @@ public sealed class MainForm : Form
                 "Still running in the system tray. Double-click the icon to open again, or right-click Exit to quit.";
             _trayIcon.BalloonTipIcon = ToolTipIcon.Info;
             _trayIcon.ShowBalloonTip(3500);
+        }
+    }
+
+    /// <summary>Another launch asked for this window (raised on a thread-pool thread).</summary>
+    private void OnActivationRequested()
+    {
+        try
+        {
+            if (IsHandleCreated && !IsDisposed)
+                BeginInvoke(RestoreFromTray);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
+        {
+            // Closing down; nothing to show.
         }
     }
 
@@ -574,8 +593,7 @@ public sealed class MainForm : Form
         _clockHost.Controls.Add(_primaryClock);
 
         // Absolute layout — coordinates are relative to leftHost (already inset by sourceCard.Padding)
-        // InputHostPanel: themes the native edit field of the TIME combo it hosts.
-        _leftHost = new InputHostPanel
+        _leftHost = new Panel
         {
             Dock = DockStyle.Fill,
             BackColor = cardFace,
@@ -598,6 +616,7 @@ public sealed class MainForm : Form
         _reverseZoneRow.BackColor = cardFace;
         StyleCaption(_inputZoneCaption, "ENTER TIME IN THIS TIMEZONE");
         _reverseSourceTimezone.Font = UiTheme.BodyFont;
+        _reverseSourceTimezone.FieldLabel = "Enter time in this timezone";
         _reverseSourceTimezone.SelectedOptionChanged += OnReverseSourceChanged;
         _reverseZoneRow.Controls.Add(_inputZoneCaption);
         _reverseZoneRow.Controls.Add(_reverseSourceTimezone);
@@ -609,6 +628,9 @@ public sealed class MainForm : Form
         _liveModeCheck.Size = _liveModeCheck.MeasureNaturalSize();
         _liveModeCheck.Checked = true;
         _liveModeCheck.CheckedChanged += OnLiveModeChanged;
+        _liveModeCheck.MouseUp += (_, _) => _ignoreLiveRecheck = false;
+        _liveModeCheck.KeyDown += (_, _) => _ignoreLiveRecheck = false;
+        _liveModeCheck.Leave += (_, _) => _ignoreLiveRecheck = false;
 
         _useNowButton.Text = "Reset to now";
         _useNowButton.Size = new Size(104, 26);
@@ -620,12 +642,14 @@ public sealed class MainForm : Form
         StyleCaption(_dateFieldCaption, "DATE");
         _datePicker.Size = new Size(148, 26);
         _datePicker.ValueChanged += OnInputChanged;
+        _datePicker.FieldLabel = "Date";
 
         StyleCaption(_timeFieldCaption, "TIME");
         _timeEntry.Size = new Size(148, 26);
         _timeEntry.Font = UiTheme.BodyFont;
         _timeEntry.Configure(use24Hour: false, includeSeconds: false);
         _timeEntry.TimeChanged += OnInputChanged;
+        _timeEntry.FieldLabel = "Time";
 
         _leftHost.Controls.Add(_sourceSectionTitle);
         _leftHost.Controls.Add(_localZoneCaption);
@@ -915,9 +939,6 @@ public sealed class MainForm : Form
         _targetCountLabel.ForeColor = UiTheme.TextSecondary;
         _targetCountLabel.BackColor = card;
 
-        UiTheme.StyleInput(_reverseSourceTimezone);
-        UiTheme.StyleInput(_timeEntry);
-
         foreach (var row in _targetRows)
             row.ApplyTheme();
         RefreshFavoriteVisuals();
@@ -1093,7 +1114,7 @@ public sealed class MainForm : Form
 
                 if (pick is not null)
                     row.SelectWindowsId(pick.WindowsId);
-                else if (row.Combo.Items.Count > 0 && row.Combo.Items[0] is TimezoneOption fallback)
+                else if (row.Combo.FirstOption is TimezoneOption fallback)
                     row.SelectWindowsId(fallback.WindowsId);
             }
 
@@ -1134,16 +1155,6 @@ public sealed class MainForm : Form
         }
     }
 
-    private static Label MakeCaption(string text) =>
-        new()
-        {
-            Text = text,
-            Font = UiTheme.CaptionFont,
-            ForeColor = UiTheme.TextSecondary,
-            BackColor = UiTheme.CardFace,
-            AutoSize = false,
-            TextAlign = ContentAlignment.MiddleLeft
-        };
 
     private void SetUpdateUiBusy(bool busy)
     {
@@ -1258,6 +1269,21 @@ public sealed class MainForm : Form
         if (!_ready || _suppressEvents)
             return;
 
+        if (_ignoreLiveRecheck && _liveModeCheck.Checked)
+        {
+            _ignoreLiveRecheck = false;
+            _suppressEvents = true;
+            try
+            {
+                _liveModeCheck.Checked = false;
+            }
+            finally
+            {
+                _suppressEvents = false;
+            }
+            return;
+        }
+
         if (_liveModeCheck.Checked)
             EnterLiveMode();
         else
@@ -1279,8 +1305,6 @@ public sealed class MainForm : Form
         }
 
         _useNowButton.Visible = false;
-        _datePicker.Enabled = false;
-        _timeEntry.Enabled = false;
         if (!_liveTimer.Enabled)
             _liveTimer.Start();
         UpdateLiveBadge();
@@ -1294,9 +1318,20 @@ public sealed class MainForm : Form
         _liveMode = false;
         _liveTimer.Stop();
         _useNowButton.Visible = true;
-        _datePicker.Enabled = true;
-        _timeEntry.Enabled = true;
-        ApplyTimePickerFormat();
+
+        // The frozen time shows minutes only, so drop the live clock's seconds from it too.
+        var wasSuppressed = _suppressEvents;
+        _suppressEvents = true;
+        try
+        {
+            _timeEntry.TimeOfDay = TimeSpan.FromMinutes(Math.Floor(_timeEntry.TimeOfDay.TotalMinutes));
+            ApplyTimePickerFormat();
+        }
+        finally
+        {
+            _suppressEvents = wasSuppressed;
+        }
+
         UpdateLiveBadge();
 
         if (!fromUserToggle || _liveModeCheck.Checked)
@@ -1332,6 +1367,7 @@ public sealed class MainForm : Form
 
         if (_liveMode)
         {
+            _ignoreLiveRecheck = _liveModeCheck.Focused;
             ExitLiveMode(fromUserToggle: false);
             return;
         }
@@ -1460,11 +1496,12 @@ public sealed class MainForm : Form
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(result.SetupDownloadUrl))
+            if (string.IsNullOrWhiteSpace(result.SetupDownloadUrl) || string.IsNullOrWhiteSpace(result.SetupSha256))
             {
+                // Silent install needs an installer from this repository with a published checksum.
                 var openOnly = MessageBox.Show(
                     this,
-                    $"{result.Message}\n\nNo installer asset found for {UpdateChecker.CurrentArchitectureLabel}.\nOpen the release page?",
+                    $"{result.Message}\n\nNo verifiable installer found for {UpdateChecker.CurrentArchitectureLabel}.\nOpen the release page?",
                     "ZoneShift update",
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Information);
@@ -1518,7 +1555,7 @@ public sealed class MainForm : Form
                 _statusLabel.ForeColor = UiTheme.TextSecondary;
             });
 
-            await UpdateChecker.InstallUpdateAsync(result.SetupDownloadUrl!, result.SetupFileName, progress);
+            await UpdateChecker.InstallUpdateAsync(result.SetupDownloadUrl!, result.SetupFileName, result.SetupSha256, progress);
             // Exit so the installer can replace files; silent [Run] relaunches ZoneShift.
             _exitRequested = true;
             PersistSettings(forceZones: true);
@@ -1586,8 +1623,6 @@ public sealed class MainForm : Form
 
             _liveMode = _settings.LiveMode;
             _liveModeCheck.Checked = _liveMode;
-            _datePicker.Enabled = !_liveMode;
-            _timeEntry.Enabled = !_liveMode;
             _useNowButton.Visible = !_liveMode;
             if (_liveMode)
                 SyncPickersToNow();
@@ -1715,13 +1750,15 @@ public sealed class MainForm : Form
         _suppressEvents = true;
         try
         {
-            if (_datePicker.Value.Date != nowInInputZone.Date)
+            // Live mode keeps both fields editable. Leave a field alone while it holds typing, so the
+            // ticking clock never rewrites it; committing that typing exits live mode.
+            if (!_datePicker.IsEditing && _datePicker.Value.Date != nowInInputZone.Date)
                 _datePicker.Value = nowInInputZone.Date;
 
             var current = _timeEntry.TimeOfDay;
-            if (current.Hours != nowInInputZone.Hour ||
+            if (!_timeEntry.IsEditing && (current.Hours != nowInInputZone.Hour ||
                 current.Minutes != nowInInputZone.Minute ||
-                current.Seconds != nowInInputZone.Second)
+                current.Seconds != nowInInputZone.Second))
             {
                 _timeEntry.TimeOfDay = nowInInputZone.TimeOfDay;
             }
@@ -1836,9 +1873,12 @@ public sealed class MainForm : Form
                 _settings.OverlayCompact = _overlay.IsCompact;
                 PersistSettings();
             };
-            _overlay.OverlayOpacity = _settings.OverlayOpacity;
-            _overlay.IsLocked = _settings.OverlayLocked;
-            _overlay.IsCompact = _settings.OverlayCompact;
+            // Capture first: each setter can raise SettingsChanged, whose handler copies the overlay's
+            // still-default state back into _settings and would overwrite the values not yet applied.
+            var (opacity, locked, compact) = (_settings.OverlayOpacity, _settings.OverlayLocked, _settings.OverlayCompact);
+            _overlay.IsLocked = locked;
+            _overlay.IsCompact = compact;
+            _overlay.OverlayOpacity = opacity;
 
             if (_settings.OverlayX >= 0 && _settings.OverlayY >= 0 &&
                 IsOnScreen(_settings.OverlayX, _settings.OverlayY))
@@ -1916,36 +1956,6 @@ public sealed class MainForm : Form
         return Screen.AllScreens.Any(s => s.WorkingArea.Contains(pt));
     }
 
-    private static bool SelectByWindowsId(ComboBox combo, string windowsId)
-    {
-        for (var i = 0; i < combo.Items.Count; i++)
-        {
-            if (combo.Items[i] is TimezoneOption opt &&
-                string.Equals(opt.WindowsId, windowsId, StringComparison.OrdinalIgnoreCase))
-            {
-                combo.SelectedIndex = i;
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static void SelectByAbbreviation(ComboBox combo, string abbreviation)
-    {
-        for (var i = 0; i < combo.Items.Count; i++)
-        {
-            if (combo.Items[i] is TimezoneOption opt &&
-                string.Equals(opt.Abbreviation, abbreviation, StringComparison.OrdinalIgnoreCase))
-            {
-                combo.SelectedIndex = i;
-                return;
-            }
-        }
-
-        if (combo.Items.Count > 0)
-            combo.SelectedIndex = 0;
-    }
 
     private TimeZoneInfo GetInputTimezone()
     {

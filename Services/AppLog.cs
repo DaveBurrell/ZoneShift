@@ -1,11 +1,14 @@
 namespace TimezoneConverter.Services;
 
 /// <summary>
-/// Simple rolling file logger under %LocalAppData%\ZoneShift\logs.
+/// Simple daily file logger under %LocalAppData%\ZoneShift\logs. Files older than
+/// <see cref="RetentionDays"/> are deleted on the first write of each run.
 /// </summary>
 public static class AppLog
 {
+    private const int RetentionDays = 14;
     private static readonly object Gate = new();
+    private static bool _pruned;
 
     public static string LogDirectory
     {
@@ -42,12 +45,34 @@ public static class AppLog
             var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] {message}{Environment.NewLine}";
             lock (Gate)
             {
+                if (!_pruned)
+                {
+                    _pruned = true;
+                    PruneOldLogs();
+                }
                 File.AppendAllText(CurrentLogPath, line);
             }
         }
         catch
         {
             // never throw from logger
+        }
+    }
+
+    private static void PruneOldLogs()
+    {
+        try
+        {
+            var cutoff = DateTime.Now.AddDays(-RetentionDays);
+            foreach (var file in Directory.EnumerateFiles(LogDirectory, "zoneshift-*.log"))
+            {
+                if (File.GetLastWriteTime(file) < cutoff)
+                    File.Delete(file);
+            }
+        }
+        catch
+        {
+            // Housekeeping only.
         }
     }
 
