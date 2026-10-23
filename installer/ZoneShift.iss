@@ -1,10 +1,10 @@
 ; ZoneShift installer - compiled by Inno Setup 6
 ; Pass architecture defines from pack-installer.ps1:
-;   ISCC /DAppArch=x64 /DPublishDir=..\publish\win-x64 /DMyAppVersion=1.7.2 ZoneShift.iss
-;   ISCC /DAppArch=arm64 /DPublishDir=..\publish\win-arm64 /DMyAppVersion=1.7.2 ZoneShift.iss
+;   ISCC /DAppArch=x64 /DPublishDir=..\publish\win-x64 /DMyAppVersion=1.8.0 ZoneShift.iss
+;   ISCC /DAppArch=arm64 /DPublishDir=..\publish\win-arm64 /DMyAppVersion=1.8.0 ZoneShift.iss
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.7.2"
+  #define MyAppVersion "1.8.0"
 #endif
 #ifndef AppArch
   #define AppArch "x64"
@@ -23,7 +23,8 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion} ({#AppArch})
 AppPublisher={#MyAppPublisher}
-DefaultDirName={localappdata}\Programs\{#MyAppName}
+; {autopf} is %LocalAppData%\Programs for a per-user install and Program Files for all users.
+DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=..\dist
@@ -59,12 +60,15 @@ Name: "startupicon"; Description: "Start ZoneShift when I sign in to Windows"; G
 [Files]
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[InstallDelete]
+; Earlier versions also placed a second Start-menu shortcut beside the program group.
+Type: files; Name: "{userprograms}\{#MyAppName}.lnk"
+
 [Icons]
-Name: "{userprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
-Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
-Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: startupicon
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autostartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: startupicon
 
 [Run]
 ; Interactive wizard: optional "Launch ZoneShift" checkbox

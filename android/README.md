@@ -24,8 +24,9 @@ separately because Android limits ordinary periodic widget refreshes.
 
 ## Requirements
 
-- Android Studio with JDK 17
-- Android SDK 35
+- Android Studio with JDK 17 or newer (Android Gradle Plugin 9.4 requires JDK 17+)
+- Android SDK Platform 37 (compile and target SDK; install `platforms;android-37.0` with the SDK Manager)
+- Gradle 9.7.1 via the included wrapper, Android Gradle Plugin 9.4.1, Kotlin 2.4.21
 - Android 8.0/API 26 or newer device or emulator
 
 Android Studio normally configures the SDK path automatically. For command-line builds, set

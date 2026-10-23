@@ -144,12 +144,4 @@ internal static class UiTheme
         btn.FlatAppearance.MouseDownBackColor = DangerPressed;
         btn.Cursor = Cursors.Hand;
     }
-
-    public static void StyleInput(Control control)
-    {
-        control.BackColor = InputBack;
-        control.ForeColor = TextPrimary;
-        if (control is ComboBox cb)
-            cb.FlatStyle = FlatStyle.Flat;
-    }
 }

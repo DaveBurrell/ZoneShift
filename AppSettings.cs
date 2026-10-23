@@ -136,30 +136,26 @@ public sealed class AppSettings
 
             var json = JsonSerializer.Serialize(this, JsonOptions);
             var temp = path + ".tmp";
-            File.WriteAllText(temp, json);
 
-            if (File.Exists(path))
+            // Flush the new file to disk before it replaces the old one: an installer can force-close
+            // the app straight after a save, and a reader must never see a half-written file.
+            using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None))
+            using (var writer = new StreamWriter(stream))
             {
-                try { File.Copy(path, BackupPath, overwrite: true); }
-                catch (Exception ex) { AppLog.Warn($"Could not write settings backup: {ex.Message}"); }
+                writer.Write(json);
+                writer.Flush();
+                stream.Flush(flushToDisk: true);
             }
 
-            File.Copy(temp, path, overwrite: true);
-            File.Delete(temp);
+            // Replace is an atomic rename that also keeps the previous file as the backup.
+            if (File.Exists(path))
+                File.Replace(temp, path, BackupPath, ignoreMetadataErrors: true);
+            else
+                File.Move(temp, path);
+
             var zoneList = string.Join(", ",
                 (TargetWindowsIds ?? Array.Empty<string?>()).Where(id => !string.IsNullOrWhiteSpace(id))!);
             AppLog.Info($"Saved settings ({TargetWindowsIds?.Length ?? 0} zones: {zoneList}) to {path}");
-
-            // Ensure data is on disk before installers/force-close can kill the process
-            try
-            {
-                using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                fs.Flush(flushToDisk: true);
-            }
-            catch
-            {
-                // best-effort
-            }
         }
         catch (Exception ex)
         {

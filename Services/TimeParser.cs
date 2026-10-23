@@ -22,6 +22,9 @@ public static class TimeParser
 
         var s = text.AsSpan().Trim();
 
+        if (TryParseNamed(s, out time))
+            return true;
+
         if (TryParseLoose(s, out time, out var hasExplicitDesignator))
             return true;
 
@@ -58,14 +61,46 @@ public static class TimeParser
         return TimeSpan.FromSeconds(total);
     }
 
+    /// <summary>"noon", "midnight", optionally prefixed by 12.</summary>
+    private static bool TryParseNamed(ReadOnlySpan<char> s, out TimeSpan time)
+    {
+        time = default;
+        if (s.StartsWith("12"))
+            s = s[2..].TrimStart();
+
+        if (s.Equals("noon", StringComparison.OrdinalIgnoreCase))
+        {
+            time = TimeSpan.FromHours(12);
+            return true;
+        }
+
+        return s.Equals("midnight", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Longest first, so "p.m." is not read as "m." after a stray "p".
+    private static readonly string[] AmSuffixes = ["a.m.", "a.m", "am", "a"];
+    private static readonly string[] PmSuffixes = ["p.m.", "p.m", "pm", "p"];
+
+    private static bool TryStripSuffix(ref ReadOnlySpan<char> s, string[] suffixes)
+    {
+        foreach (var suffix in suffixes)
+        {
+            if (s.Length > suffix.Length && s.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            {
+                s = s[..^suffix.Length].TrimEnd();
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static bool TryParseLoose(ReadOnlySpan<char> s, out TimeSpan time, out bool hasExplicitDesignator)
     {
         time = default;
-        var am = s.EndsWith("AM", StringComparison.OrdinalIgnoreCase);
-        var pm = s.EndsWith("PM", StringComparison.OrdinalIgnoreCase);
+        var am = TryStripSuffix(ref s, AmSuffixes);
+        var pm = !am && TryStripSuffix(ref s, PmSuffixes);
         hasExplicitDesignator = am || pm;
-        if (hasExplicitDesignator)
-            s = s[..^2].TrimEnd();
 
         if (!TryParseParts(s, out var hour, out var minute, out var second))
             return false;
@@ -106,7 +141,12 @@ public static class TimeParser
                 remainder = remainder[..secondsSeparator];
             }
 
-            return TryParseDigits(remainder.Trim(), out minute) && minute <= 59;
+            // "7.3" is far more likely a typo for 7:30 than a time of 7:03, so a dot needs two
+            // minute digits. A colon keeps accepting "7:5", which cannot be misread as a decimal.
+            var minutes = remainder.Trim();
+            if (separatorChar == '.' && minutes.Length != 2)
+                return false;
+            return TryParseDigits(minutes, out minute) && minute <= 59;
         }
 
         if (core.Length <= 2)

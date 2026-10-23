@@ -26,6 +26,8 @@ internal sealed class ThemedDateBox : Control
     private bool _buttonHot;
     private MonthCalendar? _calendar;
     private ToolStripDropDown? _calendarDropDown;
+    // Set when a click on the button itself closes the calendar, so that click does not reopen it.
+    private bool _swallowNextButtonDown;
 
     private static DateTime MinimumDate => new(Math.Max(
         DateTimePicker.MinimumDateTime.Date.Ticks,
@@ -35,6 +37,23 @@ internal sealed class ThemedDateBox : Control
         CultureInfo.CurrentCulture.DateTimeFormat.Calendar.MaxSupportedDateTime.Date.Ticks));
 
     public event EventHandler? ValueChanged;
+
+    /// <summary>True while the text box holds typing that differs from the committed date.</summary>
+    [Browsable(false)]
+    public bool IsEditing => _text.Text != _value.ToString("d", CultureInfo.CurrentCulture);
+
+    /// <summary>What screen readers call the field (its caption).</summary>
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    [Browsable(false)]
+    public string? FieldLabel
+    {
+        get => _text.AccessibleName;
+        set
+        {
+            AccessibleName = value;
+            _text.AccessibleName = value;
+        }
+    }
 
     public ThemedDateBox()
     {
@@ -52,6 +71,8 @@ internal sealed class ThemedDateBox : Control
         };
         _text.KeyDown += OnTextKeyDown;
         _text.Leave += (_, _) => CommitText();
+        _text.GotFocus += (_, _) => Invalidate();
+        _text.LostFocus += (_, _) => Invalidate();
         Controls.Add(_text);
 
         // After _text exists: assigning Size raises OnResize, which lays the child out.
@@ -89,11 +110,7 @@ internal sealed class ThemedDateBox : Control
         Invalidate();
     }
 
-    /// <summary>
-    /// Disabled fields sit on a muted surface so they read the same as the adjacent TIME combo,
-    /// which Windows greys out for us when it is disabled during live mode.
-    /// </summary>
-    private Color FieldFill => Enabled ? UiTheme.InputBack : UiTheme.SegmentIdle;
+    private Color FieldFill => UiPaint.FieldFill(Enabled);
 
     private void ApplyPalette()
     {
@@ -239,9 +256,16 @@ internal sealed class ThemedDateBox : Control
     protected override void OnMouseDown(MouseEventArgs e)
     {
         if (Enabled && ButtonBounds.Contains(e.Location))
-            ShowCalendar();
+        {
+            if (_swallowNextButtonDown)
+                _swallowNextButtonDown = false;
+            else
+                ShowCalendar();
+        }
         else
+        {
             _text.Focus();
+        }
 
         base.OnMouseDown(e);
     }
@@ -297,6 +321,23 @@ internal sealed class ThemedDateBox : Control
                 DropShadowEnabled = true
             };
             _calendarDropDown.Items.Add(host);
+            _calendarDropDown.Closed += (_, args) =>
+            {
+                // AutoClose shuts the calendar on mouse-down before this control sees the same
+                // click. Without this, clicking the button to close the calendar reopened it.
+                _swallowNextButtonDown = args.CloseReason == ToolStripDropDownCloseReason.AppClicked &&
+                                         ButtonBounds.Contains(PointToClient(Cursor.Position));
+                // That click is dispatched straight after this handler. If it never reaches the
+                // button, the flag must not swallow a later, genuine click.
+                if (_swallowNextButtonDown && IsHandleCreated)
+                    BeginInvoke(() => _swallowNextButtonDown = false);
+                Invalidate();
+            };
+            _calendar.KeyDown += (_, args) =>
+            {
+                if (args.KeyCode == Keys.Escape)
+                    _calendarDropDown.Close();
+            };
             _calendar.DateSelected += (_, args) =>
             {
                 // Keep the native calendar alive until its owner is disposed. Destroying it
@@ -306,6 +347,7 @@ internal sealed class ThemedDateBox : Control
             };
         }
 
+        _swallowNextButtonDown = false;
         _calendar!.SetDate(_value);
         _calendarDropDown.Show(this, new Point(0, Height));
         _calendar.Focus();
@@ -325,25 +367,9 @@ internal sealed class ThemedDateBox : Control
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
-        var bounds = ClientRectangle;
-
-        UiPaint.FillGutter(g, bounds, FieldFill);
-        UiPaint.EnableQuality(g);
-
-        var body = new Rectangle(0, 0, Math.Max(1, Width - 1), Math.Max(1, Height - 1));
-        using (var pen = new Pen(Enabled ? UiTheme.InputBorder : UiTheme.CardBorder, 1f))
-            g.DrawRectangle(pen, body);
-
         var button = ButtonBounds;
-        if (Enabled && _buttonHot)
-        {
-            using var hot = new SolidBrush(UiTheme.AccentSoft);
-            g.FillRectangle(hot, button);
-        }
-
-        using (var divider = new Pen(UiTheme.InputBorder, 1f))
-            g.DrawLine(divider, button.Left - 1, body.Top + 1, button.Left - 1, body.Bottom - 1);
-
+        var focused = _text.Focused || _calendarDropDown is { Visible: true };
+        UiPaint.PaintFieldChrome(g, ClientSize, button, Enabled, focused, _buttonHot);
         DrawCalendarGlyph(g, button, Enabled ? UiTheme.Accent : UiTheme.TextMuted);
     }
 

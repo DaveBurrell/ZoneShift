@@ -173,7 +173,8 @@ public static class TimeConversionService
     {
         var lines = new List<string>
         {
-            $"ZoneShift ({snap.PrimaryLocalTime:yyyy-MM-dd}{(live ? ", live" : "")})",
+            // Invariant: shared text must carry a Gregorian ISO date whatever calendar the PC uses.
+            $"ZoneShift ({snap.PrimaryLocalTime.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)}{(live ? ", live" : "")})",
             $"Local: {FormatDigital(snap.PrimaryLocalTime, use24Hour, live)} ({FormatOffset(snap.PrimaryUtcOffset)})"
         };
         foreach (var t in snap.Targets)

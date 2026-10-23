@@ -9,12 +9,27 @@ public sealed class TimezoneOption
     public string DisplayName { get; }
     public string WindowsId { get; }
 
-    public TimezoneOption(string abbreviation, string displayName, string windowsId)
+    /// <summary>Extra words search should match, such as the cities a zone covers. Not displayed.</summary>
+    public string Keywords { get; }
+
+    public TimezoneOption(string abbreviation, string displayName, string windowsId, string keywords = "")
     {
         Abbreviation = abbreviation;
         DisplayName = displayName;
         WindowsId = windowsId;
+        Keywords = keywords;
     }
+
+    /// <summary>Major cities missing from the Windows names of the curated US zones.</summary>
+    private static readonly Dictionary<string, string> CityAliases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Eastern Standard Time"] = "New York, Toronto, Boston, Washington, Atlanta, Miami",
+        ["Central Standard Time"] = "Chicago, Dallas, Houston, Winnipeg",
+        ["Mountain Standard Time"] = "Denver, Calgary, Edmonton",
+        ["Pacific Standard Time"] = "Los Angeles, San Francisco, Seattle, Vancouver",
+        ["Alaskan Standard Time"] = "Anchorage",
+        ["Hawaiian Standard Time"] = "Honolulu",
+    };
 
     public TimeZoneInfo GetTimeZoneInfo() => TimeZoneInfo.FindSystemTimeZoneById(WindowsId);
 
@@ -68,9 +83,14 @@ public sealed class TimezoneOption
 
         foreach (var option in Common)
         {
-            if (!TryResolve(option.WindowsId, out _))
+            if (!TryResolve(option.WindowsId, out var tz))
                 continue;
-            list.Add(option);
+            // The curated name replaces Windows' "(UTC+10:00) Canberra, Melbourne, Sydney", so keep
+            // that text searchable: otherwise "Sydney" or "Mumbai" found nothing.
+            var keywords = CityAliases.TryGetValue(option.WindowsId, out var cities)
+                ? $"{tz.DisplayName} {cities}"
+                : tz.DisplayName;
+            list.Add(new TimezoneOption(option.Abbreviation, option.DisplayName, option.WindowsId, keywords));
             knownIds.Add(option.WindowsId);
         }
 
@@ -79,18 +99,28 @@ public sealed class TimezoneOption
             if (knownIds.Contains(tz.Id))
                 continue;
 
-            var abbr = tz.StandardName;
-            if (string.IsNullOrWhiteSpace(abbr) || abbr.Length > 18)
-                abbr = tz.Id.Length <= 16 ? tz.Id : tz.Id[..16];
-
-            list.Add(new TimezoneOption(abbr, tz.DisplayName, tz.Id));
+            list.Add(new TimezoneOption(ShortLabel(tz.Id), tz.DisplayName, tz.Id));
             knownIds.Add(tz.Id);
         }
 
         return list;
     }
 
-    private static bool TryResolve(string windowsId, out TimeZoneInfo? tz)
+    internal const int MaxLabelLength = 24;
+
+    /// <summary>
+    /// Short label for a zone without a curated abbreviation. Windows ids are stable English
+    /// names ("Vladivostok Standard Time"); dropping the suffix keeps them readable on a clock
+    /// tile, where cutting the id at a fixed width produced labels like "Vladivostok Stan".
+    /// </summary>
+    internal static string ShortLabel(string windowsId)
+    {
+        // Also inside ids such as "Pacific Standard Time (Mexico)".
+        var label = windowsId.Replace(" Standard Time", "", StringComparison.OrdinalIgnoreCase).Trim();
+        return label.Length <= MaxLabelLength ? label : label[..(MaxLabelLength - 1)].TrimEnd() + "…";
+    }
+
+    private static bool TryResolve(string windowsId, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TimeZoneInfo? tz)
     {
         try
         {
