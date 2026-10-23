@@ -1,6 +1,8 @@
 package com.zoneshift.app.ui.theme
 
 import android.app.Activity
+import android.os.Build
+import android.view.Window
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -88,8 +90,9 @@ fun ZoneShiftTheme(themeName: String, content: @Composable () -> Unit) {
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            window.statusBarColor = scheme.background.toArgb()
-            window.navigationBarColor = scheme.background.toArgb()
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+                window.setLegacySystemBarColors(scheme.background.toArgb())
+            }
             WindowCompat.getInsetsController(window, view).apply {
                 isAppearanceLightStatusBars = themeName == "Classic" || themeName == "Meridian"
                 isAppearanceLightNavigationBars = themeName == "Classic" || themeName == "Meridian"
@@ -97,4 +100,13 @@ fun ZoneShiftTheme(themeName: String, content: @Composable () -> Unit) {
         }
     }
     MaterialTheme(colorScheme = scheme, content = content)
+}
+
+// Android 15+ enforces edge-to-edge for apps targeting API 35+, where these setters are no-ops and
+// the themed background is drawn behind the transparent system bars instead. On API 26-34 they
+// still tint the bars, and the platform offers no non-deprecated replacement.
+@Suppress("DEPRECATION")
+private fun Window.setLegacySystemBarColors(color: Int) {
+    statusBarColor = color
+    navigationBarColor = color
 }
