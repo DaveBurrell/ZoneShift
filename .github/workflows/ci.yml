@@ -4,17 +4,18 @@ on:
   push:
     branches: [main]
   pull_request:
-  release:
-    types: [published]
+
+permissions:
+  contents: read
 
 jobs:
   build-test:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: "10.0.x"
 
@@ -25,7 +26,8 @@ jobs:
         run: dotnet build ZoneShift.sln -c Release --no-restore
 
       - name: Test
-        run: dotnet test ZoneShift.sln -c Release --no-build --verbosity normal
+        # global.json opts into Microsoft.Testing.Platform (xUnit v3).
+        run: dotnet test --solution ZoneShift.sln -c Release --no-build
 
       - name: Publish win-x64
         run: >
@@ -46,7 +48,7 @@ jobs:
           -o publish/win-arm64
 
       - name: Upload published exes
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ZoneShift-publish
           path: |

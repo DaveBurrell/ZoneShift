@@ -12,10 +12,10 @@ jobs:
   build-and-release:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: "10.0.x"
 
@@ -23,7 +23,7 @@ jobs:
         run: |
           dotnet restore ZoneShift.sln
           dotnet build ZoneShift.sln -c Release --no-restore
-          dotnet test ZoneShift.sln -c Release --no-build --verbosity normal
+          dotnet test --solution ZoneShift.sln -c Release --no-build
 
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
@@ -42,9 +42,15 @@ jobs:
 
       - name: Publish and pack installers
         shell: pwsh
+        # Passed through the environment, never interpolated into the script, so a tag name
+        # cannot inject PowerShell.
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          ISCC_PATH: ${{ steps.iscc.outputs.path }}
         run: |
-          $version = if ("${{ github.ref_name }}" -match '^v(.+)$') { $Matches[1] } else { "0.0.0" }
-          $iscc = "${{ steps.iscc.outputs.path }}"
+          if ($env:TAG_NAME -notmatch '^v(\d+\.\d+\.\d+)$') { throw "Tag '$env:TAG_NAME' is not vMAJOR.MINOR.PATCH" }
+          $version = $Matches[1]
+          $iscc = $env:ISCC_PATH
           $root = $PWD
 
           function Publish($rid) {
@@ -55,6 +61,7 @@ jobs:
               -p:IncludeNativeLibrariesForSelfExtract=true `
               -p:EnableCompressionInSingleFile=true `
               -p:DebugType=none `
+              -p:Version=$version `
               -o $out
             if ($LASTEXITCODE -ne 0) { throw "publish $rid failed" }
           }
@@ -72,7 +79,7 @@ jobs:
           Get-ChildItem dist -Filter "ZoneShift-Setup-*.exe" | ForEach-Object { $_.FullName }
 
       - name: Upload release assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: |
             dist/ZoneShift-Setup-*-x64.exe

@@ -2,6 +2,42 @@
 
 All notable changes to ZoneShift are documented here.
 
+## 1.8.0
+
+### Timezone pickers rebuilt
+- **Typing into a timezone field now searches.** Clicking a field selects its zone name, so typing replaces it. Previously the typed text was appended to the full name ("IST - India Standard Timelon"), matched nothing, and was discarded on Tab
+- **The suggestion list fits its results.** The native combo sized its list only when it opened, so a search with two matches left a 16-row empty box over the window. The list now resizes on every keystroke and shows "No matching timezones" instead of vanishing
+- Search matches words in any order and ranks exact names, then abbreviations, then whole-word matches; favourites and the curated common zones lead ties ("pacific" offers PST first)
+- Cities find their zone: curated zones also match Windows' city list ("Sydney", "Mumbai") and major US cities ("New York", "Los Angeles")
+- Generated zone labels drop the "Standard Time" suffix instead of being cut mid-word ("Vladivostok Stan" is now "Vladivostok")
+- Fields are fully themed, including the drop button and border, which take the accent while focused. This resolves the 1.7.0 known issue of a light combo outline on the dark themes
+
+### Setting a time
+- **Up/Down step to the neighbouring half hour** (7:45 PM → 8:00 PM / 7:30 PM); Page Up/Down move an hour. They used to jump to 12:00 AM
+- The preset list opens on the current time rather than at midnight
+- Typing "1" no longer autocompletes to a preset; the field accepts what you type and commits it on Enter or when you leave
+- **Date and time stay editable in live mode.** Typing a time or picking a date switches to that custom time; the live clock never overwrites a field you are in
+- New time formats: "noon", "midnight", "7 a.m.", "7p". A dot now needs two minute digits, so "7.3" is rejected rather than read as 7:03
+- Clicking the calendar button while the calendar is open now closes it
+
+### Fix
+- Opening ZoneShift while it is hidden in the tray now shows the window (it silently did nothing)
+- The overlay remembers Lock and Compact across restarts
+- Settings are written to a flushed temporary file and swapped in atomically, so a forced close mid-save cannot leave a truncated file
+- Copied results always carry an ISO Gregorian date, whatever calendar Windows uses
+- Logs older than 14 days are deleted
+
+### Security
+- Updates install only from this repository's GitHub releases over HTTPS, and only after the download matches the SHA-256 digest GitHub publishes for it. The installer is downloaded into a private folder and kept locked until it starts. A release without a digest offers the release page instead
+- The update check times out after 20 seconds instead of 10 minutes
+
+### Build
+- Release builds stamp the executable with the tag's version, and tags must be `vMAJOR.MINOR.PATCH`. A tag that disagreed with the project version previously caused endless update offers
+- GitHub Actions updated (checkout v7, setup-dotnet v6, upload-artifact v7, action-gh-release v3) and pinned to commit SHAs; the tag name is no longer interpolated into the release script
+- Tests moved to xUnit v3 on Microsoft.Testing.Platform (`dotnet test --solution ZoneShift.sln`); 218 cases
+- The installer creates one Start-menu shortcut (it created two) and uses per-user/all-users aware folders
+- Android: AGP 9.4.1, Kotlin 2.4.21, Gradle 9.7.1, compile/target SDK 37, current AndroidX libraries
+
 ## 1.7.2
 
 ### Fix
